@@ -1,7 +1,7 @@
 {
-  "id": "ledger-obsidian",
-  "name": "Ledger",
-  "author": "Tony Grosinger",
+  "id": "ledger-obsidian-pedro",
+  "name": "Ledger Pedro",
+  "author": "Pedro Cortes, forked from Tony Grosinger",
   "authorUrl": "https://grosinger.net",
   "description": "Plain text accounting",
   "isDesktopOnly": false,

@@ -1,5 +1,5 @@
 {
-  "name": "ledger-obsidian",
+  "name": "ledger-obsidian-pedro",
   "version": "0.3.3",
   "description": "Plain text accounting",
   "main": "main.js",
@@ -15,7 +15,7 @@
     "nearley-test": "nearley-test"
   },
   "keywords": [],
-  "author": "Tony Grosinger",
+  "author": "Pedro Cortes",
   "license": "GPL-3.0",
   "devDependencies": {
     "@babel/core": "7.16.0",
