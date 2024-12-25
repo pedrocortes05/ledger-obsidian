@@ -30,10 +30,14 @@ export const formatTransaction = (
       const currency = line.currency ? line.currency : currencySymbol;
       const symb = line.reconcile ? line.reconcile : ' ';
       const comment = line.comment ? `    ; ${line.comment}` : '';
+
+      const isSymbolOnLeft = currency.length === 1; // Assume single-character symbols go on the left
+      const formattedAmount = isSymbolOnLeft
+        ? `${currency}${line.amount.toFixed(2)}`
+        : `${line.amount.toFixed(2)} ${currency}`;
+
       return i !== tx.value.expenselines.length - 1
-        ? `  ${symb} ${line.account}    ${currency}${line.amount.toFixed(
-            2,
-          )}${comment}`
+        ? `  ${symb} ${line.account}    ${formattedAmount}${comment}`
         : `  ${symb} ${line.account}${comment}`;
     })
     .join('\n');
