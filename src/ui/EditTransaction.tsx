@@ -215,6 +215,11 @@ const ExpenseLine: React.FC<{
               formik.values,
             ).unwrapOr('Error')}
             currencySymbol={props.currencySymbol}
+            currencyOptions={[
+              { label: '($) USD', value: 'USD' },
+              { label: '(€) EUR', value: 'EUR' },
+              { label: '(¥) JPY', value: 'JPY' },
+            ]}
             name={`lines.${i}.amount`}
           />
         ) : (
@@ -222,6 +227,11 @@ const ExpenseLine: React.FC<{
             className="currencyInput"
             component={CurrencyInputFormik}
             currencySymbol={props.currencySymbol}
+            currencyOptions={[
+              { label: '($) USD', value: 'USD' },
+              { label: '(€) EUR', value: 'EUR' },
+              { label: '(¥) JPY', value: 'JPY' },
+            ]}
             name={`lines.${i}.amount`}
             disabled={i + 1 === lines.length}
           />
@@ -312,6 +322,7 @@ export interface Values {
   date: string;
   total: string;
   lines: Line[];
+  currencyType: string;
 }
 
 interface ValueErrors {
@@ -319,6 +330,7 @@ interface ValueErrors {
   date?: string;
   total?: string;
   lines?: string;
+  currencyType?: string;
 }
 
 export const EditTransaction: React.FC<{
@@ -348,6 +360,7 @@ export const EditTransaction: React.FC<{
             amount: '',
             comment: '',
             reconcile: '',
+            currency: '',
           },
           {
             id: 1,
@@ -355,6 +368,7 @@ export const EditTransaction: React.FC<{
             amount: '',
             comment: '',
             reconcile: '',
+            currency: '',
           },
         ]
       : props.initialState.value.expenselines
@@ -369,6 +383,7 @@ export const EditTransaction: React.FC<{
               currency: line.currency,
             }),
           ),
+    currencyType: isNew ? '$' : '$',
   };
 
   return (
@@ -421,6 +436,7 @@ export const EditTransaction: React.FC<{
           return errors;
         }}
         onSubmit={(values) => {
+          console.log("What are the vnpm aleus: ", values);
           if (values.lines.filter((line) => line.amount === '').length > 0) {
             // Fill missing values in the expense lines
             calcPlaceholderExpenseLineAmount(values).map((amount) => {
@@ -461,6 +477,7 @@ export const EditTransaction: React.FC<{
               ),
               check: props.initialState.value.check,
               comment: props.initialState.value.comment,
+              currencyType: values.currencyType,
             },
           };
 
@@ -494,6 +511,7 @@ export const EditTransaction: React.FC<{
                     ]}
                   />
                 </Margin>
+                
                 <div className="flexRow">
                   <Margin className="flexGrow">
                     <Field
@@ -501,6 +519,11 @@ export const EditTransaction: React.FC<{
                       currencySymbol={props.currencySymbol}
                       name="total"
                       placeholder="Total Amount"
+                      currencyOptions={[
+                        { label: '($) USD', value: 'USD' },
+                        { label: '(€) EUR', value: 'EUR' },
+                        { label: '(¥) JPY', value: 'JPY' },
+                      ]}
                     />
                     <ErrorMessage name="total" component="div" />
                   </Margin>
@@ -510,6 +533,7 @@ export const EditTransaction: React.FC<{
                     <ErrorMessage name="date" component="div" />
                   </Margin>
                 </div>
+
                 {formik.values.txType !== 'transfer' && (
                   <Margin>
                     <Field
@@ -551,6 +575,7 @@ export const EditTransaction: React.FC<{
                             amount: '',
                             comment: '',
                             reconcile: '',
+                            currency: '',
                           };
                           insert(formik.values.lines.length - 1, newLine);
                         }}

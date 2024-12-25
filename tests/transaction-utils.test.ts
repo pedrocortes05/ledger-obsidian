@@ -74,6 +74,7 @@ describe('formatting a transaction into ledger', () => {
             reconcile: '',
           },
         ],
+        currencyType: '$',
       },
     };
 
@@ -120,6 +121,7 @@ describe('getTotal()', () => {
             reconcile: '',
           },
         ],
+        currencyType: '$',
       },
     };
     const result = getTotal(tx, '$');
@@ -151,6 +153,7 @@ describe('getCurrency()', () => {
             reconcile: '',
           },
         ],
+        currencyType: '$',
       },
     };
     const result = getCurrency(tx, '$');
@@ -179,6 +182,7 @@ describe('getCurrency()', () => {
             reconcile: '',
           },
         ],
+        currencyType: '$',
       },
     };
     const result = getCurrency(tx, '$');
@@ -206,6 +210,7 @@ describe('getCurrency()', () => {
             reconcile: '',
           },
         ],
+        currencyType: '$',
       },
     };
     const result = getCurrency(tx, '$');
@@ -357,6 +362,7 @@ describe('filterTransactions', () => {
           reconcile: '',
         },
       ],
+      currencyType: '$',
     },
   };
   const tx2: EnhancedTransaction = {
@@ -381,6 +387,7 @@ describe('filterTransactions', () => {
           reconcile: '',
         },
       ],
+      currencyType: '$',
     },
   };
   const tx3: EnhancedTransaction = {
@@ -405,6 +412,7 @@ describe('filterTransactions', () => {
           reconcile: '',
         },
       ],
+      currencyType: '$',
     },
   };
   test('When there are no filters', () => {

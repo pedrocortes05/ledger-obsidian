@@ -91,6 +91,7 @@ describe('bucketTransaction()', () => {
       date: '2021-12-15',
       payee: "Trader Joe's",
       expenselines: [],
+      currencyType: '$',
     },
   };
   const tx3: EnhancedTransaction = {
@@ -101,6 +102,7 @@ describe('bucketTransaction()', () => {
       date: '2021-11-29',
       payee: 'PCC',
       expenselines: [],
+      currencyType: '$',
     },
   };
   test('when there is only one bucket', () => {

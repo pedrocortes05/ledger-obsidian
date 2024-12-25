@@ -10,6 +10,7 @@ export const emptyTransaction: EnhancedTransaction = {
     date: '',
     payee: '',
     expenselines: [],
+    currencyType: '',
   },
 };
 
@@ -27,7 +28,7 @@ export const formatTransaction = (
         return `    ; ${line.comment}`;
       }
 
-      const currency = line.currency ? line.currency : currencySymbol;
+      const currency = line.currency || tx.value.currencyType || currencySymbol;
       const symb = line.reconcile ? line.reconcile : ' ';
       const comment = line.comment ? `    ; ${line.comment}` : '';
 

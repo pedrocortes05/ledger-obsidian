@@ -118,6 +118,7 @@ describe('Balance maps', () => {
           amount: -100,
         },
       ],
+      currencyType: '$',
     },
   };
   const tx5: EnhancedTransaction = {
@@ -142,6 +143,7 @@ describe('Balance maps', () => {
           reconcile: '',
         },
       ],
+      currencyType: '$',
     },
   };
   const tx6: EnhancedTransaction = {
@@ -166,6 +168,7 @@ describe('Balance maps', () => {
           amount: -20,
         },
       ],
+      currencyType: '$',
     },
   };
 

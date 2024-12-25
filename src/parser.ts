@@ -93,6 +93,7 @@ export interface Transaction {
     date: string;
     payee: string;
     expenselines: (Expenseline | Commentline)[];
+    currencyType?: string;
   };
 }
 
@@ -106,6 +107,7 @@ export interface EnhancedTransaction {
     date: string;
     payee: string;
     expenselines: (EnhancedExpenseLine | Commentline)[];
+    currencyType?: string;
   };
 }
 

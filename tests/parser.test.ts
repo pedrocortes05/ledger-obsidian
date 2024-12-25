@@ -154,6 +154,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.firstDate).toEqual(window.moment('2021/04/20'));
@@ -192,6 +193,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.transactions).toHaveLength(1);
@@ -229,6 +231,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.transactions).toHaveLength(1);
@@ -285,6 +288,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.transactions).toHaveLength(1);
@@ -339,6 +343,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.transactions).toHaveLength(1);
@@ -380,6 +385,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       const expected2: EnhancedTransaction = {
@@ -409,6 +415,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.parsingErrors).toEqual([]);
@@ -456,6 +463,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.transactions).toHaveLength(1);
@@ -503,6 +511,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.transactions).toHaveLength(1);
@@ -540,6 +549,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.parsingErrors).toEqual([]);
@@ -578,6 +588,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.transactions).toHaveLength(1);
@@ -621,6 +632,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       const expected2: EnhancedTransaction = {
@@ -650,6 +662,7 @@ describe('parsing a ledger file', () => {
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       expect(txCache.parsingErrors.length).toEqual(1);
@@ -815,6 +828,7 @@ alias b=Banking
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       const expectedAlias1: AliasWithBlock = {
@@ -888,6 +902,7 @@ alias b=Banking
               reconcile: '',
             },
           ],
+          currencyType: '$',
         },
       };
       const expectedAlias: AliasWithBlock = {
@@ -958,6 +973,7 @@ alias c=Credit
             currency: '$',
           },
         ],
+        currencyType: '$',
       },
     };
 
