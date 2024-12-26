@@ -37,9 +37,11 @@ export const formatTransaction = (
         ? `${currency}${line.amount.toFixed(2)}`
         : `${line.amount.toFixed(2)} ${currency}`;
 
+      const formattedAccount = line.isVirtual ? `(${line.account})` : line.account;
+
       return i !== tx.value.expenselines.length - 1
-        ? `  ${symb} ${line.account}    ${formattedAmount}${comment}`
-        : `  ${symb} ${line.account}${comment}`;
+        ? `  ${symb} ${formattedAccount}    ${formattedAmount}${comment}`
+        : `  ${symb} ${formattedAccount}${comment}`;
     })
     .join('\n');
   return `\n${tx.value.date} ${tx.value.payee}\n${joinedLines}`;

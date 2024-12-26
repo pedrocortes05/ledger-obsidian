@@ -86,11 +86,11 @@ const calcPlaceholderExpenseLineAmount = (
 ): Result<string, string> => {
   const linesExceptLast = values.lines.slice(0, -1);
   const numEmptyLines = linesExceptLast.filter(
-    (line) => line.amount === '',
+    (line) => line.amount === '' && !line.isVirtual,
   ).length;
   const unassignedTotal = linesExceptLast.reduce(
     (amount, line) =>
-      line.amount === '' ? amount : amount - parseFloat(line.amount),
+      line.isVirtual || line.amount === '' ? amount : amount - parseFloat(line.amount),
     parseFloat(values.total),
   );
   if (numEmptyLines === 0 && unassignedTotal !== 0) {
@@ -305,6 +305,7 @@ interface Line {
   comment: string;
   reconcile: '' | '*' | '!';
   currency?: string;
+  isVirtual?: boolean;
 }
 
 const lineToEnhancedExpenseLine = (line: Line): EnhancedExpenseLine => ({
@@ -314,6 +315,7 @@ const lineToEnhancedExpenseLine = (line: Line): EnhancedExpenseLine => ({
   reconcile: line.reconcile,
   comment: line.comment || undefined,
   currency: line.currency,
+  isVirtual: line.isVirtual,
 });
 
 export interface Values {
@@ -581,6 +583,28 @@ export const EditTransaction: React.FC<{
                         }}
                       >
                         Add Split
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const prevMaxID = formik.values.lines.reduce(
+                            (max, line) => Math.max(max, line.id),
+                            -1,
+                          );
+                          const newLine: Line = {
+                            id: prevMaxID + 1,
+                            account: '',
+                            amount: '',
+                            comment: '',
+                            reconcile: '',
+                            currency: '',
+                            isVirtual: true,
+                          };
+                          insert(formik.values.lines.length - 1, newLine);
+                        }}
+                      >
+                        Add Virtual Transaction
                       </button>
                     </>
                   )}

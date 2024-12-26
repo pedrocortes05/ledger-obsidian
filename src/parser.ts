@@ -78,6 +78,7 @@ export interface EnhancedExpenseLine {
   currency?: string;
   dealiasedAccount: string;
   reconcile: '' | '*' | '!';
+  isVirtual?: boolean;
 }
 
 export interface Commentline {
