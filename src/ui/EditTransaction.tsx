@@ -438,7 +438,6 @@ export const EditTransaction: React.FC<{
           return errors;
         }}
         onSubmit={(values) => {
-          console.log("What are the vnpm aleus: ", values);
           if (values.lines.filter((line) => line.amount === '').length > 0) {
             // Fill missing values in the expense lines
             calcPlaceholderExpenseLineAmount(values).map((amount) => {

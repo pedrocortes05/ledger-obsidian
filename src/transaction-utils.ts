@@ -22,6 +22,7 @@ export const formatTransaction = (
   tx: EnhancedTransaction,
   currencySymbol: string,
 ): string => {
+  let firstVirtualAccount: string | null = null;
   const joinedLines = tx.value.expenselines
     .map((line, i) => {
       if (!('account' in line)) {
@@ -39,12 +40,19 @@ export const formatTransaction = (
 
       const formattedAccount = line.isVirtual ? `(${line.account})` : line.account;
 
+      // Capture the first virtual account
+      if (line.isVirtual && !firstVirtualAccount) {
+        firstVirtualAccount = line.account;
+      }
+
       return i !== tx.value.expenselines.length - 1
         ? `  ${symb} ${formattedAccount}    ${formattedAmount}${comment}`
         : `  ${symb} ${formattedAccount}${comment}`;
     })
     .join('\n');
-  return `\n${tx.value.date} ${tx.value.payee}\n${joinedLines}`;
+
+  const virtualCode = firstVirtualAccount ? `(${firstVirtualAccount}) ` : '';
+  return `\n${tx.value.date} ${virtualCode}${tx.value.payee}\n${joinedLines}`;
 };
 
 /**
