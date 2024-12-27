@@ -22,6 +22,13 @@ import { err, ok, Result } from 'neverthrow';
 import React from 'react';
 import styled from 'styled-components';
 
+const CurrencyOptions = [
+  { label: '($) MXN', value: 'MXN' },
+  { label: '($) USD', value: 'USD' },
+  { label: '(€) EUR', value: 'EUR' },
+  { label: '(¥) JPY', value: 'JPY' },
+]
+
 const ButtonGroupStyle = styled.div`
   display: flex;
 
@@ -229,11 +236,7 @@ const ExpenseLine: React.FC<{
               formik.values,
             ).unwrapOr('Error')}
             currencySymbol={props.currencySymbol}
-            currencyOptions={[
-              { label: '($) USD', value: 'USD' },
-              { label: '(€) EUR', value: 'EUR' },
-              { label: '(¥) JPY', value: 'JPY' },
-            ]}
+            currencyOptions={CurrencyOptions}
             name={`lines.${i}.amount`}
             currencyID={`lines.${i}.currency`}
           />
@@ -242,14 +245,10 @@ const ExpenseLine: React.FC<{
             className="currencyInput"
             component={CurrencyInputFormik}
             currencySymbol={props.currencySymbol}
-            currencyOptions={[
-              { label: '($) USD', value: 'USD' },
-              { label: '(€) EUR', value: 'EUR' },
-              { label: '(¥) JPY', value: 'JPY' },
-            ]}
+            currencyOptions={CurrencyOptions}
             name={`lines.${i}.amount`}
             currencyID={`lines.${i}.currency`}
-            disabled={i + 1 === lines.length}
+            //disabled={i + 1 === lines.length}
           />
         )}
       </Margin>
@@ -538,11 +537,7 @@ export const EditTransaction: React.FC<{
                       currencySymbol={props.currencySymbol}
                       name="total"
                       placeholder="Total Amount"
-                      currencyOptions={[
-                        { label: '($) USD', value: 'USD' },
-                        { label: '(€) EUR', value: 'EUR' },
-                        { label: '(¥) JPY', value: 'JPY' },
-                      ]}
+                      currencyOptions={CurrencyOptions}
                     />
                     <ErrorMessage name="total" component="div" />
                   </Margin>
