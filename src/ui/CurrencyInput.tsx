@@ -9,7 +9,7 @@ const InputWithIconWrapper = styled.div`
 
 const InputWithIcon = styled.input`
   /* important required to override mobile stylesheet */
-  padding-left: 65px !important;
+  padding-left: 70px !important;
   width: 100%;
 `;
 
@@ -32,7 +32,7 @@ const InputSelect = styled.div`
   transform: translate(0, -50%);
   top: 50%;
   pointer-events: auto; /* Allows interaction with dropdown */
-  width: auto; /* Adjust width based on content */
+  width: 70px;
   height: 100%; /* Ensure it aligns with the input */
 `;
 
