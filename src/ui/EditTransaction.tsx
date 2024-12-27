@@ -669,8 +669,7 @@ export const EditTransaction: React.FC<{
                     if (!hadError) {
                       // The final expense line should be set to the opposite of the total
                       const firstLine = 0;
-                      const inverse = -1 * parseFloat(formik.values.total);
-                      formik.values.lines[firstLine].amount = inverse.toFixed(2);
+                      formik.values.lines[firstLine].amount = parseFloat(formik.values.total).toFixed(2);
                       setPage(page + 1);
                     }
                   }}
