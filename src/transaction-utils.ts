@@ -38,20 +38,18 @@ export const formatTransaction = (
         ? `${currency}${line.amount.toFixed(2)}`
         : `${line.amount.toFixed(2)} ${currency}`;
 
-      const formattedAccount = line.isVirtual ? `(${line.account})` : line.account;
-
       // Capture the first virtual account
       if (line.isVirtual && !firstVirtualAccount) {
         firstVirtualAccount = line.account;
       }
 
       return i !== tx.value.expenselines.length - 1
-        ? `  ${symb} ${formattedAccount}    ${formattedAmount}${comment}`
-        : `  ${symb} ${formattedAccount}${comment}`;
+        ? `  ${symb} ${line.account}    ${formattedAmount}${comment}`
+        : `  ${symb} ${line.account}${comment}`;
     })
     .join('\n');
 
-  const virtualCode = firstVirtualAccount ? `(${firstVirtualAccount}) ` : '';
+  const virtualCode = firstVirtualAccount ? `${firstVirtualAccount} ` : '';
   return `\n${tx.value.date} ${virtualCode}${tx.value.payee}\n${joinedLines}`;
 };
 

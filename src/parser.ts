@@ -61,6 +61,8 @@ export interface TransactionCache {
    * liabilityAccounts is dealiased and only contains liability accounts.
    */
   liabilityAccounts: string[];
+
+  virtualAccounts: string[];
 }
 
 export interface Expenseline {
@@ -160,7 +162,9 @@ export const parse = (
       // of the file) or a transaction (sort by date)
 
       try {
+        // console.log(block.block);
         const innerresults = parser.feed(block.block).finish();
+        // console.log(innerresults);
         if (innerresults.length !== 1) {
           // Returning multiple results means that the results were ambiguous
           errors.push({
@@ -172,6 +176,7 @@ export const parse = (
         const elements: Element[] = innerresults[0];
         return assignLineNumbersToElements(elements, block);
       } catch (error) {
+        // console.log("Failed: ", error);
         errors.push({
           message: 'Failed to parse block in ledger file',
           error,
@@ -262,7 +267,9 @@ export const parse = (
   const expenseAccounts: string[] = [];
   const incomeAccounts: string[] = [];
   const liabilityAccounts: string[] = [];
+  const virtualAccounts: string[] = [];
   accounts.forEach((c) => {
+    // console.log("Account: ", c);
     if (c.startsWith(settings.assetAccountsPrefix)) {
       assetAccounts.push(c);
     } else if (c.startsWith(settings.expenseAccountsPrefix)) {
@@ -271,6 +278,8 @@ export const parse = (
       incomeAccounts.push(c);
     } else if (c.startsWith(settings.liabilityAccountsPrefix)) {
       liabilityAccounts.push(c);
+    } else if (c.startsWith(settings.virtualAccountsPrefix)) {
+      virtualAccounts.push(c);
     }
   });
 
@@ -293,6 +302,7 @@ export const parse = (
     expenseAccounts,
     incomeAccounts,
     liabilityAccounts,
+    virtualAccounts,
   };
 };
 

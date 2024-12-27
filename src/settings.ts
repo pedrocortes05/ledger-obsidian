@@ -8,6 +8,7 @@ const defaultSettings: ISettings = {
   expenseAccountsPrefix: 'Expenses',
   incomeAccountsPrefix: 'Income',
   liabilityAccountsPrefix: 'Liabilities',
+  virtualAccountsPrefix: '(',
 };
 
 export interface ISettings {
@@ -20,6 +21,7 @@ export interface ISettings {
   expenseAccountsPrefix: string;
   incomeAccountsPrefix: string;
   liabilityAccountsPrefix: string;
+  virtualAccountsPrefix: string;
 }
 
 export const settingsWithDefaults = (

@@ -157,6 +157,13 @@ const ExpenseLine: React.FC<{
   const lines = formik.values.lines;
 
   const getAccountName = (): string => {
+    const line = lines[i]; // Get the current line
+
+    // Check if the line is virtual
+    if (line.isVirtual) {
+      return 'Virtual';
+    }
+
     const lastI = lines.length - 1;
     switch (formik.values.txType) {
       case 'expense':
@@ -175,6 +182,13 @@ const ExpenseLine: React.FC<{
   );
 
   const getSuggestions = (): string[] => {
+    const line = lines[i]; // Get the current line
+
+    // Check if the line is virtual
+    if (line.isVirtual) {
+      return props.txCache.virtualAccounts;
+    }
+
     const lastI = lines.length - 1;
     switch (formik.values.txType) {
       case 'expense':

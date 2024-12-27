@@ -42,11 +42,12 @@
         ws:     /[ \t]+/,
         absoluteNumber: { match: /[0-9.,]+/, value: (s:string) => s.replace(/,/g, '') },
         numberSign: /-/,
-        currency: /[$£₤€₳₿₹¥￥₩Р₱₽₴₫]/, // Note: Р != P
+        currency: ['$', 'USD', 'EUR', 'NVDA', 'TSLA', 'AMD', 'ELF', 'XBI', 'NOW'],
         reconciled: /[!*]/,
         comment: { match: /[;#|][^\n]+/, value: (s:string) => s.slice(1).trim() },
         assertion: {match: /==?\*?/},
-        account: { match: /[^$£₤€₳₿₹¥￥₩Р₱₽₴₫;#|\n\-]+/, value: (s:string) => s.trim() },
+        account: { match: /[a-zA-Z: ()]+/, value: (s:string) => s.trim() },
+        //account: { match: /[a-zA-Z: ()]+/, value: (s:string) => {console.log("Account token found:", s); return s.trim()} },
       },
       alias: {
         account: { match: /[a-zA-Z0-9: ]+/, value: (s:string) => s.trim() },
@@ -89,6 +90,7 @@ expenseline ->
     %ws:+ reconciled:? %account amount:? balance:? %ws:* %comment:?
                                                   {%
                                                     function([,r,acct,amt,_ba,,cmt]) {
+                                                      // console.log("Parsed tokens:", { r, acct, amt, _ba, cmt });
                                                       return {
                                                         reconcile: r || '',
                                                         account: acct.value,
@@ -104,6 +106,8 @@ balance -> %ws:* %assertion %ws:+ amount                      {% (d) => {return 
 reconciled -> %reconciled %ws:+                   {% ([r,]) => r.value %}
 alias -> "alias" %account %equal %account         {% ([,l,,r]) => { return { blockLine: l.line, left: l.value, right: r.value } } %}
 amount -> %currency %absoluteNumber                       {% ([c,a]) => { return {currency: c.value, amount: parseFloat(a.value)} } %}
+amount -> %absoluteNumber %ws %currency                       {% ([a,,c]) => { return {currency: c.value, amount: parseFloat(a.value)} } %}
+amount -> %numberSign %absoluteNumber %ws %currency                       {% ([ns,a,,c]) => { return {currency: c.value, amount: parseFloat(ns.value + a.value)} } %}
 amount -> %currency %numberSign %absoluteNumber                       {% ([c,ns,a]) => { return {currency: c.value, amount: parseFloat(ns.value + a.value)} } %}
 amount -> %numberSign %currency %absoluteNumber                       {% ([ns,c,a]) => { return {currency: c.value, amount: parseFloat(ns.value + a.value)} } %}
 check -> %check                                   {% ([c]) => parseFloat(c.value) %}
