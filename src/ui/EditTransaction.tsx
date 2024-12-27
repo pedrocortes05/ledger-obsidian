@@ -235,6 +235,7 @@ const ExpenseLine: React.FC<{
               { label: '(¥) JPY', value: 'JPY' },
             ]}
             name={`lines.${i}.amount`}
+            currencyID={`lines.${i}.currency`}
           />
         ) : (
           <Field
@@ -247,6 +248,7 @@ const ExpenseLine: React.FC<{
               { label: '(¥) JPY', value: 'JPY' },
             ]}
             name={`lines.${i}.amount`}
+            currencyID={`lines.${i}.currency`}
             disabled={i + 1 === lines.length}
           />
         )}
@@ -452,6 +454,7 @@ export const EditTransaction: React.FC<{
           return errors;
         }}
         onSubmit={(values) => {
+          // console.log("What are the vnpm aleus: ", values);
           if (values.lines.filter((line) => line.amount === '').length > 0) {
             // Fill missing values in the expense lines
             calcPlaceholderExpenseLineAmount(values).map((amount) => {
@@ -497,6 +500,7 @@ export const EditTransaction: React.FC<{
           };
 
           const txStr = formatTransaction(newTx, props.currencySymbol);
+          // console.log("txstr: ", txStr);
 
           switch (props.operation) {
             case 'new':

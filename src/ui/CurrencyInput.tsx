@@ -55,6 +55,7 @@ export const CurrencyInputFormik: React.FC<
     placeholder: string | undefined;
     disabled?: boolean;
     currencyOptions: { label: string; value: string }[]; // Array of dropdown options
+    currencyID: string;
   } & FieldProps<string, Values>
 > = (props): JSX.Element => (
   <CurrencyInput
@@ -66,7 +67,7 @@ export const CurrencyInputFormik: React.FC<
       props.form.setFieldValue(props.field.name, newValue);
     }}
     setCurrencyType={(currencyType: string) => {
-      props.form.setFieldValue('currencyType', currencyType);
+      props.form.setFieldValue(props.currencyID || 'currencyType', currencyType);
     }}
     disabled={props.disabled || false}
   />
