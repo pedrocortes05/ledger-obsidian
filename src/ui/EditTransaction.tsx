@@ -458,6 +458,17 @@ export const EditTransaction: React.FC<{
           }
 
           if (values.lines.filter((line) => line.amount === '').length === 0) {
+            var currencies = new Set<string>();
+            for (var i = 0; i < values.lines.length; i++) {
+              currencies.add(values.lines[i].currency || '');
+            }
+          
+            // Check if all lines have the same currency
+            if (currencies.size > 1) {
+              // Skip validation if lines have different currencies
+              return;
+            }
+
             // Validate that the amounts all add to zero
             const sum = values.lines.reduce(
               (acc, line) => parseFloat(line.amount) + acc,
