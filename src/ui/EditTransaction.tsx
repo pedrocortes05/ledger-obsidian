@@ -91,13 +91,15 @@ const ButtonGroup: React.FC<
 const calcPlaceholderExpenseLineAmount = (
   values: Values,
 ): Result<string, string> => {
-  const linesExceptLast = values.lines.slice(0, -1);
+  const linesExceptLast = values.lines.slice(0, -1).filter(
+    (line) => !line.isVirtual,
+  );
   const numEmptyLines = linesExceptLast.filter(
     (line) => line.amount === '' && !line.isVirtual,
   ).length;
   const unassignedTotal = linesExceptLast.reduce(
     (amount, line) =>
-      line.isVirtual || line.amount === '' ? amount : amount - parseFloat(line.amount),
+      line.amount === '' ? amount : amount - parseFloat(line.amount),
     parseFloat(values.total),
   );
   if (numEmptyLines === 0 && unassignedTotal !== 0) {
@@ -106,6 +108,21 @@ const calcPlaceholderExpenseLineAmount = (
     );
   }
   return ok((unassignedTotal / numEmptyLines).toFixed(2));
+};
+
+const calcPlaceholderExpenseLineAmountTotal = (
+  values: Values,
+): Result<string, string> => {
+  const linesExceptLast = values.lines.slice(0, -1).filter(
+    (line) => !line.isVirtual,
+  );
+  const TotalAmount = linesExceptLast.reduce(
+    (amount, line) =>
+      line.amount === '' ? amount : amount + parseFloat(line.amount),
+    0, // Initial value of the accumulator
+  );
+  
+  return ok((TotalAmount * -1).toFixed(2));
 };
 
 const ExpenseLineStyle = styled.div`
@@ -244,6 +261,9 @@ const ExpenseLine: React.FC<{
           <Field
             className="currencyInput"
             component={CurrencyInputFormik}
+            placeholder={calcPlaceholderExpenseLineAmountTotal(
+              formik.values,
+            ).unwrapOr('Error')}
             currencySymbol={props.currencySymbol}
             currencyOptions={CurrencyOptions}
             name={`lines.${i}.amount`}
