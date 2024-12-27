@@ -43,7 +43,7 @@ export const formatTransaction = (
         firstVirtualAccount = line.account;
       }
 
-      return i !== tx.value.expenselines.length - 1
+      return line.amount
         ? `  ${symb} ${line.account}    ${formattedAmount}${comment}`
         : `  ${symb} ${line.account}${comment}`;
     })
