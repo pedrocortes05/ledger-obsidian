@@ -33,9 +33,14 @@
         check: { match: /\([0-9]+\)[ \t]+/, value: (s:string) => s.trim().slice(1, -1) },
         ws:     /[ \t]+/,
         reconciled: /[!*]/,
+        leftParenthesis: { match: '(', push: 'virtualCode' },
         payee: { match: /[^!*;#|\n][^!;#|\n]+/, value: (s:string) => s.trim() },
         comment: { match: /[;#|][^\n]+/, value: (s:string) => s.slice(1).trim() },
         newline: { match: '\n', lineBreaks: true, next: 'expenseLine'},
+      },
+      virtualCode: {
+        virtual: { match: /[^()]+/, lineBreaks: true },
+        rightParenthesis: { match: ')', pop: 1 },
       },
       expenseLine: {
         newline: { match: '\n', lineBreaks: true },
@@ -68,16 +73,18 @@ element ->
   | %comment     {% ([c]) => { return { type: 'comment', blockLine: c.line, value: c.value } } %}
   | alias        {% ([a]) => { var l = a.blockLine; delete a.blockLine; return { type: 'alias', blockLine: l, value: a } } %}
 
-transaction -> %date %ws check:? %payee %comment:? %newline expenselines
+transaction -> %date %ws check:? %leftParenthesis:? %virtual:? %rightParenthesis:? %ws:? %payee %comment:? %newline expenselines
                                                   {%
                                                     function(d) {
+                                                      // console.log("d: ", d)
                                                       return {
                                                         blockLine: d[0].line,
                                                         date: d[0].value,
                                                         check: d[2] || undefined,
-                                                        payee: d[3].value,
-                                                        comment: d[4]?.value || undefined,
-                                                        expenselines: d[6]
+                                                        virtual: d[4].value || undefined,
+                                                        payee: d[7].value,
+                                                        comment: d[8]?.value || undefined,
+                                                        expenselines: d[10]
                                                       }
                                                     }
                                                   %}
