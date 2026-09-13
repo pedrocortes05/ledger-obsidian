@@ -33,6 +33,11 @@ const file = `2026/09/01 Spotify
     Assets:Banking:Checking    $9000.00
     Income:Causartt
 
+2026/09/06  Steam  ;  note
+    Expenses:Games    $321.48
+    (Budget:Boston)    -15.73 USD
+    Assets:Banking:Checking
+
 2026/09/07 AAPL buy
     Assets:Brokerage    1.23 AAPL @@ 265.17 USD
     Assets:Banking:Bank of America    = 1000.00 USD
@@ -241,12 +246,24 @@ test('splitVirtual()', () => {
 
 describe('buildTransactionText()', () => {
   test('unchanged edit reproduces the original block', () => {
-    [1, 3].forEach((index) => {
+    [1, 3, 4].forEach((index) => {
       const { values, leadingComments } = initialValues(ctx('modify', index));
       expect(buildTransactionText(values, ctx('modify', index), leadingComments)).toEqual(
         txCache.transactions[index].block.block,
       );
     });
+  });
+
+  test('budget line in the header code follows the budget line when edited', () => {
+    const { values, leadingComments } = initialValues(ctx('modify', 1));
+    values.lines[1] = { ...values.lines[1], account: 'Budget:Madrid' };
+    expect(
+      buildTransactionText(values, ctx('modify', 1), leadingComments).split('\n')[0],
+    ).toEqual('2026/09/05 (Budget:Madrid) Star Market');
+    values.lines.splice(1, 1);
+    expect(
+      buildTransactionText(values, ctx('modify', 1), leadingComments).split('\n')[0],
+    ).toEqual('2026/09/05 Star Market');
   });
 
   test('editing one line keeps the others, comments and the budget code', () => {

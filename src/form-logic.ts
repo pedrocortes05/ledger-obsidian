@@ -419,11 +419,18 @@ export const validateValues = (
   if (values.lines.some((line) => line.amount !== '' && parseTyped(line.amount) === undefined)) {
     lineErrors.push('Amounts must be numbers.');
   }
-  if (realLines.length < 2) {
+  if (values.lines.length < 2) {
     lineErrors.push('A transaction needs at least two accounts.');
   }
+  // A line kept from the file with a balance assignment (`= $500`) gets its
+  // amount from the running balance, so it cannot be checked here.
+  const isAssignment = (line: Line): boolean =>
+    line.amount.trim() === '' &&
+    !!line.original &&
+    !line.original.hasWrittenAmount &&
+    !!line.original.assertion;
   const emptyReal = realLines.filter(
-    (line) => line.amount.trim() === '' && !(line.original && !line.original.hasWrittenAmount && line.original.assertion),
+    (line) => line.amount.trim() === '' && !isAssignment(line),
   );
   if (emptyReal.length > 1) {
     lineErrors.push('Only one line can be left empty; it balances the transaction.');
@@ -436,7 +443,11 @@ export const validateValues = (
     lineErrors.push('Budget lines need an amount.');
   }
 
-  if (emptyReal.length === 0 && lineErrors.length === 0) {
+  if (
+    emptyReal.length === 0 &&
+    !realLines.some(isAssignment) &&
+    lineErrors.length === 0
+  ) {
     const sums: AmountMap = new Map();
     const hasPrice = realLines.some((line) => line.original?.price || line.original?.lotCost);
     realLines.forEach((line) => {
@@ -566,11 +577,16 @@ export const buildTransactionText = (
   const originalVirtualNames = original
     ? getPostings(original).filter((p) => p.virtual).map((p) => p.account)
     : [];
+  // New transactions get the budget account as their code, like
+  // "2024/11/29 (Budget:Boston) Star Market". Edits keep the header as it was,
+  // only following the budget line when the code mirrored it.
   let code: string | undefined;
-  if (budgetLine) {
-    code = budgetLine.account;
-  } else if (original?.value.code && !originalVirtualNames.includes(original.value.code)) {
-    code = original.value.code;
+  if (!original) {
+    code = budgetLine?.account;
+  } else if (original.value.code !== undefined) {
+    code = originalVirtualNames.includes(original.value.code)
+      ? budgetLine?.account
+      : original.value.code;
   }
 
   const expenselines: (EnhancedExpenseLine | Commentline)[] = [...leadingComments];
@@ -592,7 +608,19 @@ export const buildTransactionText = (
       expenselines,
     },
   };
-  return formatTransaction(tx, ctx.txCache.commodityMap);
+  const text = formatTransaction(tx, ctx.txCache.commodityMap);
+  if (
+    original &&
+    original.block.block &&
+    tx.value.date === original.value.date &&
+    tx.value.code === original.value.code &&
+    tx.value.payee === original.value.payee
+  ) {
+    // Keep the original header text (spacing, note formatting).
+    const [, ...rest] = text.split('\n');
+    return [original.block.block.split('\n')[0], ...rest].join('\n');
+  }
+  return text;
 };
 
 /**
