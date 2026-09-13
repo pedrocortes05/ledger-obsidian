@@ -8,12 +8,12 @@ const defaultSettings: ISettings = {
   expenseAccountsPrefix: 'Expenses',
   incomeAccountsPrefix: 'Income',
   liabilityAccountsPrefix: 'Liabilities',
-  virtualAccountsPrefix: '(',
 };
 
 export interface ISettings {
   tutorialIndex: number;
 
+  /** Default commodity for new transactions, e.g. "$" or "USD". */
   currencySymbol: string;
   ledgerFile: string;
 
@@ -21,12 +21,23 @@ export interface ISettings {
   expenseAccountsPrefix: string;
   incomeAccountsPrefix: string;
   liabilityAccountsPrefix: string;
-  virtualAccountsPrefix: string;
 }
 
+/**
+ * settingsWithDefaults fills in missing settings and drops settings that no
+ * longer exist (virtual accounts are now detected from their parentheses).
+ */
 export const settingsWithDefaults = (
-  settings: Partial<ISettings>,
-): ISettings => ({
-  ...defaultSettings,
-  ...settings,
-});
+  settings: Partial<ISettings> | null | undefined,
+): ISettings => {
+  const result = { ...defaultSettings };
+  if (settings) {
+    (Object.keys(defaultSettings) as (keyof ISettings)[]).forEach((key) => {
+      const value = settings[key];
+      if (value !== undefined && typeof value === typeof defaultSettings[key]) {
+        (result as Record<string, unknown>)[key] = value;
+      }
+    });
+  }
+  return result;
+};
