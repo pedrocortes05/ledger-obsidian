@@ -1,164 +1,186 @@
-import { EnhancedTransaction } from './parser';
-import { some } from 'lodash';
+import { isAccountOrChild } from './account-utils';
+import {
+  addToAmountMap,
+  AmountMap,
+  CommodityInfo,
+  formatAmount,
+} from './amounts';
+import {
+  Commentline,
+  EnhancedExpenseLine,
+  EnhancedTransaction,
+  getPostings,
+  VirtualType,
+} from './parser';
+import { ISettings } from './settings';
 import { Moment } from 'moment';
+
+export { dealiasAccount, isAccountOrChild } from './account-utils';
 
 export const emptyTransaction: EnhancedTransaction = {
   type: 'tx',
   block: { firstLine: -1, lastLine: -1, block: '' },
-  blockLine: -1,
   value: {
     date: '',
+    dateISO: '',
+    status: '',
     payee: '',
     expenselines: [],
-    currencyType: '',
   },
 };
 
+export const wrapVirtual = (account: string, virtual: VirtualType): string => {
+  switch (virtual) {
+    case '(':
+      return `(${account})`;
+    case '[':
+      return `[${account}]`;
+    default:
+      return account;
+  }
+};
+
+const INDENT = '    ';
+
+/**
+ * formatPosting writes a posting. Postings that still have their original
+ * `raw` text are written unchanged so nothing the form does not understand
+ * (prices, lots, assertions, alignment) is lost.
+ */
+export const formatPosting = (
+  line: EnhancedExpenseLine,
+  commodities: Map<string, CommodityInfo>,
+): string => {
+  if (line.raw) {
+    return line.raw;
+  }
+  const status = line.reconcile ? `${line.reconcile} ` : '';
+  const account = wrapVirtual(line.account, line.virtual);
+  let amount = '';
+  if (line.hasWrittenAmount) {
+    const info = commodities.get(line.currency);
+    const minDecimals = Math.max(
+      line.precision,
+      Math.min(info ? info.precision : 2, 2),
+    );
+    amount = formatAmount(
+      { commodity: line.currency, quantity: line.amount },
+      info,
+      minDecimals,
+    );
+  }
+  const annotations = line.annotations ? ` ${line.annotations}` : '';
+  const comment = line.comment ? `  ; ${line.comment}` : '';
+  const amountPart = amount || annotations ? `    ${amount}${annotations}` : '';
+  return `${INDENT}${status}${account}${amountPart}${comment}`.trimEnd();
+};
+
+const formatComment = (line: Commentline): string =>
+  line.raw || `${INDENT}; ${line.comment}`;
+
 /**
  * formatTransaction converts a transaction object into the string
- * representation which can be stored in the Ledger file.
+ * representation which can be stored in the Ledger file. The result has no
+ * leading or trailing blank lines.
  */
 export const formatTransaction = (
   tx: EnhancedTransaction,
-  currencySymbol: string,
+  commodities: Map<string, CommodityInfo>,
 ): string => {
-  let firstVirtualAccount: string | null = null;
-  const joinedLines = tx.value.expenselines
-    .map((line, i) => {
-      if (!('account' in line)) {
-        return `    ; ${line.comment}`;
-      }
-
-      const currency = line.currency || tx.value.currencyType || currencySymbol;
-      const symb = line.reconcile ? line.reconcile : ' ';
-      const comment = line.comment ? `    ; ${line.comment}` : '';
-
-      const isSymbolOnLeft = currency.length === 1; // Assume single-character symbols go on the left
-      const formattedAmount = isSymbolOnLeft
-        ? `${currency}${line.amount.toFixed(2)}`
-        : `${line.amount.toFixed(2)} ${currency}`;
-
-      // Capture the first virtual account
-      if (line.isVirtual && !firstVirtualAccount) {
-        firstVirtualAccount = line.account;
-      }
-
-      return line.amount
-        ? `  ${symb} ${line.account}    ${formattedAmount}${comment}`
-        : `  ${symb} ${line.account}${comment}`;
-    })
-    .join('\n');
-
-  const virtualCode = firstVirtualAccount ? `${firstVirtualAccount} ` : '';
-  return `\n${tx.value.date} ${virtualCode}${tx.value.payee}\n${joinedLines}`;
+  const { value } = tx;
+  const header = [
+    value.auxDate ? `${value.date}=${value.auxDate}` : value.date,
+    value.status,
+    value.code ? `(${value.code})` : '',
+    value.payee,
+  ]
+    .filter((part) => part !== '')
+    .join(' ');
+  const headerComment = value.comment ? `  ; ${value.comment}` : '';
+  const lines = value.expenselines.map((line) =>
+    'account' in line
+      ? formatPosting(line, commodities)
+      : formatComment(line),
+  );
+  return [header + headerComment, ...lines].join('\n');
 };
 
 /**
- * getTotal returns the total value of the transaction. It assumes that all
- * lines use the same currency. In a transaction, any 1 line may be left empty
- * and can be inferred from the remainder. If muliple lines are empty, it will
- * return a 0 value.
+ * getTransactionTotal returns the sum of the positive real postings per
+ * commodity, which is what the transaction moved (e.g. "$500.00").
  */
-export const getTotal = (
-  tx: EnhancedTransaction,
-  defaultCurrency: string,
-): string => {
-  const currency = getCurrency(tx, defaultCurrency);
-  const total = getTotalAsNum(tx);
-  return currency + total.toFixed(2);
+export const getTransactionTotal = (tx: EnhancedTransaction): AmountMap => {
+  const total: AmountMap = new Map();
+  getPostings(tx)
+    .filter((posting) => posting.virtual === '')
+    .forEach((posting) =>
+      posting.amounts
+        .filter((amount) => amount.quantity > 0)
+        .forEach((amount) =>
+          addToAmountMap(total, amount.commodity, amount.quantity),
+        ),
+    );
+  return total;
 };
 
-export const getTotalAsNum = (tx: EnhancedTransaction): number => {
-  // The total of an EnhancedTransaction is -1 * the last line that is not a comment
-  for (let i = tx.value.expenselines.length - 1; i >= 0; i--) {
-    const line = tx.value.expenselines[i];
-    if ('amount' in line) {
-      // This is the last line which is not a comment-only line
-      return -1 * line.amount;
-    }
-  }
-
-  // If we got here then there are no expenselines with an amount, which would not happen because of validation in the parser.
-  return 0;
-};
+export type TxType = 'expense' | 'income' | 'transfer';
 
 /**
- * getCurrency attempts to return the currency symbol used in this transaction.
- * It will return the currency symbol used by the first expense line that has
- * one. If no expense lines have a currency symbol, then the provided
- * defaultCurrency value will be returned.
+ * inferTxType guesses how the add/edit form should label a transaction.
  */
-export const getCurrency = (
+export const inferTxType = (
   tx: EnhancedTransaction,
-  defaultCurrency: string,
-): string => {
-  for (let i = 0; i < tx.value.expenselines.length; i++) {
-    const line = tx.value.expenselines[i];
-    if ('currency' in line && line.currency) {
-      return line.currency;
-    }
+  settings: ISettings,
+): TxType => {
+  const accounts = getPostings(tx)
+    .filter((posting) => posting.virtual === '')
+    .map((posting) => posting.dealiasedAccount);
+  if (accounts.some((a) => isAccountOrChild(a, settings.expenseAccountsPrefix))) {
+    return 'expense';
   }
-  return defaultCurrency;
-};
-
-/**
- * firstDate returns the date of the earliest transaction.
- */
-export const firstDate = (txs: EnhancedTransaction[]): Moment =>
-  txs.reduce((prev, tx) => {
-    const current = window.moment(tx.value.date);
-    return current.isSameOrBefore(prev) ? current : prev;
-  }, window.moment());
-
-export const valueForAccount = (
-  tx: EnhancedTransaction,
-  account: string,
-): number => {
-  for (let i = 0; i < tx.value.expenselines.length; i++) {
-    const line = tx.value.expenselines[i];
-    if (!('account' in line)) {
-      continue;
-    }
-    if (line.account === account || line.dealiasedAccount === account) {
-      return i + 1 === tx.value.expenselines.length
-        ? -1 * line.amount // On the last line
-        : line.amount;
-    }
+  if (accounts.some((a) => isAccountOrChild(a, settings.incomeAccountsPrefix))) {
+    return 'income';
   }
-  return 0;
+  return 'transfer';
 };
 
 export type Filter = (tx: EnhancedTransaction) => boolean;
 
 /**
- * filterByAccount accepts an account name and attempts to match to
- * transactions. Checks both account name an dealiased acocunt name.
+ * filterByAccount matches transactions with a posting to the account or one of
+ * its sub-accounts. Checks both the account name and the dealiased name.
  */
 export const filterByAccount =
   (account: string): Filter =>
   (tx: EnhancedTransaction): boolean =>
-    some(
-      tx.value.expenselines,
+    getPostings(tx).some(
       (line) =>
-        ('account' in line && line.account.startsWith(account)) ||
-        ('dealiasedAccount' in line &&
-          line.dealiasedAccount.startsWith(account)),
+        isAccountOrChild(line.account, account) ||
+        isAccountOrChild(line.dealiasedAccount, account),
     );
 
 export const filterByPayeeExact =
-  (account: string): Filter =>
+  (payee: string): Filter =>
   (tx: EnhancedTransaction): boolean =>
-    tx.value.payee === account;
+    tx.value.payee === payee;
 
-export const filterByStartDate =
-  (start: Moment): Filter =>
-  (tx) =>
-    start.isSameOrBefore(window.moment(tx.value.date));
+const toISODate = (date: Moment | string): string =>
+  typeof date === 'string' ? date : date.format('YYYY-MM-DD');
 
-export const filterByEndDate =
-  (end: Moment): Filter =>
+export const filterByStartDate = (start: Moment | string): Filter => {
+  const startISO = toISODate(start);
+  return (tx) => tx.value.dateISO >= startISO;
+};
+
+export const filterByEndDate = (end: Moment | string): Filter => {
+  const endISO = toISODate(end);
+  return (tx) => tx.value.dateISO <= endISO;
+};
+
+export const filterByTag =
+  (tag: string): Filter =>
   (tx) =>
-    end.isSameOrAfter(window.moment(tx.value.date));
+    hasTag(tx, tag);
 
 /**
  * filterTransactions filters the provided transactions if _any_ of the provided
@@ -168,21 +190,69 @@ export const filterTransactions = (
   txs: EnhancedTransaction[],
   ...filters: Filter[]
 ): EnhancedTransaction[] =>
-  filters.length > 0 ? txs.filter((tx) => some(filters, (fn) => fn(tx))) : txs;
+  filters.length > 0 ? txs.filter((tx) => filters.some((fn) => fn(tx))) : txs;
 
-export const dealiasAccount = (
-  account: string,
-  aliases: Map<string, string>,
-): string => {
-  const firstDelimeter = account.indexOf(':');
-  if (firstDelimeter > 0) {
-    const prefix = account.substring(0, firstDelimeter);
-    if (aliases.has(prefix)) {
-      return aliases.get(prefix) + account.substring(firstDelimeter);
-    }
-  }
-  return aliases.get(account) || account;
-};
+/**
+ * sortByDateDesc returns a new array with the most recent transactions first.
+ * Transactions on the same date keep reverse file order.
+ */
+export const sortByDateDesc = (
+  txs: EnhancedTransaction[],
+): EnhancedTransaction[] =>
+  txs
+    .map((tx, index) => ({ tx, index }))
+    .sort((a, b) =>
+      a.tx.value.dateISO === b.tx.value.dateISO
+        ? b.index - a.index
+        : a.tx.value.dateISO < b.tx.value.dateISO
+        ? 1
+        : -1,
+    )
+    .map(({ tx }) => tx);
+
+const escapeRegExp = (text: string): string =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const commentHasTag = (comment: string | undefined, tag: string): boolean =>
+  !!comment && comment.includes(`:${tag}:`);
+
+/**
+ * hasTag returns true if the transaction header, a comment line, or a posting
+ * comment contains the `:tag:` tag.
+ */
+export const hasTag = (tx: EnhancedTransaction, tag: string): boolean =>
+  commentHasTag(tx.value.comment, tag) ||
+  tx.value.expenselines.some((line) => commentHasTag(line.comment, tag));
+
+/**
+ * removeTag returns the transaction block text without the `:tag:` tag.
+ * `:a:tag:b:` becomes `:a:b:`, and a comment line that only contained the tag
+ * is removed entirely.
+ */
+export const removeTag = (block: string, tag: string): string =>
+  block
+    .split('\n')
+    .flatMap((line) => {
+      const match = /(^|\s);/.exec(line);
+      if (!match) {
+        return [line];
+      }
+      const semicolon = match.index + match[1].length;
+      const before = line.slice(0, semicolon);
+      const comment = line.slice(semicolon + 1);
+      if (!commentHasTag(comment, tag)) {
+        return [line];
+      }
+      const newComment = comment
+        .replace(new RegExp(`:${escapeRegExp(tag)}:`), ':')
+        .replace(/(^|\s):(?=\s|$)/g, '$1')
+        .trim();
+      if (newComment !== '') {
+        return [`${before}; ${newComment}`];
+      }
+      return before.trim() === '' ? [] : [before.trimEnd()];
+    })
+    .join('\n');
 
 export interface Node {
   id: string;
@@ -209,9 +279,7 @@ export const makeAccountTree = (
     if (!destNode.subRows) {
       destNode.subRows = [];
     }
-
-    const newParent = parent ? `${parent}:${parts[0]}` : parts[0];
-    makeAccountTree(destNode.subRows, parts.slice(1).join(':'), newParent);
+    makeAccountTree(destNode.subRows, parts.slice(1).join(':'), fullName);
   }
 };
 

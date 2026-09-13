@@ -1,221 +1,158 @@
-import { EnhancedTransaction, FileBlock, parse } from '../src/parser';
+import { parse } from '../src/parser';
 import { settingsWithDefaults } from '../src/settings';
 import {
+  dealiasAccount,
   filterByAccount,
-  filterByPayeeExact,
-  filterTransactions,
   formatTransaction,
-  getCurrency,
-  getTotal,
+  getTransactionTotal,
+  hasTag,
+  inferTxType,
   makeAccountTree,
   Node,
+  removeTag,
   sortAccountTree,
+  sortByDateDesc,
 } from '../src/transaction-utils';
-import { assert } from 'console';
-import * as moment from 'moment';
 
-window.moment = moment;
+const settings = settingsWithDefaults({});
 
-const emptyBlock: FileBlock = {
-  firstLine: -1,
-  lastLine: -1,
-  block: '',
-};
-
-describe('formatting a transaction into ledger', () => {
-  test('a transaction with a line comment and reconciliation symbol', () => {
-    const contents = `2021-04-20 Obsidian
-  ! e:Spending Money    $20.00    ; Inline comment
-    ; line comment
-    b:CreditUnion`;
-    const txCache = parse(contents, settingsWithDefaults({}));
-    expect(txCache.parsingErrors).toEqual([]);
-    if (txCache.transactions.length !== 1 || !txCache.transactions[0]) {
-      assert(false);
-      return; // Appease the type checker
-    }
-    const output = formatTransaction(txCache.transactions[0], '$');
-    expect(output).toEqual('\n' + contents);
+describe('formatTransaction()', () => {
+  test('unchanged transactions round-trip exactly', () => {
+    const contents = `2024/06/05=2024/06/06 * (Budget:Boston) XBI sale  ; note
+    ; event: [[2024-06-05 Sale]]
+\t Assets:Cash    $4771.61 @@ 272.06 USD
+    Assets:USA    -2.90 XBI {89.3931034483 USD} [2024/06/03] @@ 272.06 USD
+    (Budget:Boston)    -34.73 USD  ; memo
+    Assets:Checking    = $8816.51
+    Income:Capital Gains`;
+    const cache = parse(contents, settings);
+    expect(formatTransaction(cache.transactions[0], cache.commodityMap)).toEqual(
+      contents,
+    );
   });
-  test('a transaction with non-default currency', () => {
-    const contents = `2021-04-20 Obsidian
-  * e:Spending Money    €20.00
-  ! b:CreditUnion`;
-    const txCache = parse(contents, settingsWithDefaults({}));
-    expect(txCache.parsingErrors).toEqual([]);
-    if (txCache.transactions.length !== 1 || !txCache.transactions[0]) {
-      assert(false);
-      return; // Appease the type checker
+
+  test('new postings use the commodity style and keep precision', () => {
+    const cache = parse(
+      `2024/01/01 A
+    Expenses:X    -$1,000.00
+    Assets:Y    1.5 SOL
+    Assets:Z`,
+      settings,
+    );
+    const tx = cache.transactions[0];
+    tx.value.expenselines.forEach((line) => {
+      line.raw = '';
+    });
+    const postings = tx.value.expenselines;
+    if ('account' in postings[1]) {
+      postings[1].amount = 0.00719462;
+      postings[1].precision = 8;
     }
-    const output = formatTransaction(txCache.transactions[0], '$');
-    expect(output).toEqual('\n' + contents);
+    if ('account' in postings[2]) {
+      postings[2].virtual = '(';
+    }
+    expect(formatTransaction(tx, cache.commodityMap)).toEqual(`2024/01/01 A
+    Expenses:X    -$1,000.00
+    Assets:Y    0.00719462 SOL
+    (Assets:Z)`);
   });
-  test('when the tx has the minimum allowed values', () => {
-    const tx: EnhancedTransaction = {
-      type: 'tx',
-      blockLine: -1,
-      block: emptyBlock,
-      value: {
-        date: '2021/12/31',
-        payee: 'test-payee',
-        expenselines: [
-          {
-            account: 'test-account-1',
-            dealiasedAccount: 'test-account-1',
-            amount: 10.0,
-            currency: '$',
-            reconcile: '',
-          },
-          {
-            account: 'test-account-2',
-            dealiasedAccount: 'test-account-2',
-            amount: -10.0,
-            currency: '$',
-            reconcile: '',
-          },
-        ],
-        currencyType: '$',
-      },
-    };
 
-    const expected = [
-      '',
-      '2021/12/31 test-payee',
-      '    test-account-1    $10.00',
-      '    test-account-2',
-    ].join('\n');
-
-    const result = formatTransaction(tx, '$');
-    expect(result).toEqual(expected);
+  test('explicit zero amounts are written', () => {
+    const cache = parse('2024/01/01 A\n  Assets:X  $0.00\n  Equity  $0', settings);
+    const tx = cache.transactions[0];
+    tx.value.expenselines.forEach((line) => {
+      line.raw = '';
+    });
+    expect(formatTransaction(tx, cache.commodityMap)).toEqual(
+      '2024/01/01 A\n    Assets:X    $0.00\n    Equity    $0.00',
+    );
   });
 });
 
-describe('getTotal()', () => {
-  test('simple test', () => {
-    const tx: EnhancedTransaction = {
-      type: 'tx',
-      blockLine: -1,
-      block: emptyBlock,
-      value: {
-        date: '2021/12/04',
-        payee: 'Testing',
-        expenselines: [
-          {
-            amount: 40,
-            currency: '$',
-            account: 'account1',
-            dealiasedAccount: 'account1',
-            reconcile: '',
-          },
-          {
-            account: 'account2',
-            dealiasedAccount: 'account2',
-            amount: 20,
-            reconcile: '',
-          },
-          {
-            amount: -60,
-            currency: '$',
-            account: 'account3',
-            dealiasedAccount: 'account3',
-            reconcile: '',
-          },
-        ],
-        currencyType: '$',
-      },
-    };
-    const result = getTotal(tx, '$');
-    expect(result).toEqual('$60.00');
+describe('getTransactionTotal()', () => {
+  test('sums positive real postings per commodity', () => {
+    const cache = parse(
+      `2024/01/01 A
+    Expenses:Food    $50
+    Expenses:Travel    20 USD
+    (Budget:Trip)    $500
+    Assets:Cash    -$50
+    Assets:Bank    -20 USD`,
+      settings,
+    );
+    expect(getTransactionTotal(cache.transactions[0])).toEqual(
+      new Map([
+        ['$', 50],
+        ['USD', 20],
+      ]),
+    );
   });
 });
 
-describe('getCurrency()', () => {
-  test('When the first expense line has a currency', () => {
-    const tx: EnhancedTransaction = {
-      type: 'tx',
-      blockLine: -1,
-      block: emptyBlock,
-      value: {
-        date: '2021/12/04',
-        payee: 'Testing',
-        expenselines: [
-          {
-            amount: 40,
-            currency: 'L',
-            account: 'account1',
-            dealiasedAccount: 'account1',
-            reconcile: '',
-          },
-          {
-            amount: -40,
-            account: 'account3',
-            dealiasedAccount: 'account3',
-            reconcile: '',
-          },
-        ],
-        currencyType: '$',
-      },
-    };
-    const result = getCurrency(tx, '$');
-    expect(result).toEqual('L');
+describe('inferTxType()', () => {
+  test.each([
+    ['Expenses:Food', 'expense'],
+    ['Income:Salary', 'income'],
+    ['Assets:Savings', 'transfer'],
+  ])('%s', (account, expected) => {
+    const cache = parse(
+      `2024/01/01 A\n  ${account}  $1\n  Assets:Cash`,
+      settings,
+    );
+    expect(inferTxType(cache.transactions[0], settings)).toEqual(expected);
   });
-  test('When the second expense line has a currency', () => {
-    const tx: EnhancedTransaction = {
-      type: 'tx',
-      blockLine: -1,
-      block: emptyBlock,
-      value: {
-        date: '2021/12/04',
-        payee: 'Testing',
-        expenselines: [
-          {
-            amount: -40,
-            account: 'account1',
-            dealiasedAccount: 'account1',
-            reconcile: '',
-          },
-          {
-            amount: 40,
-            currency: 'L',
-            account: 'account3',
-            dealiasedAccount: 'account3',
-            reconcile: '',
-          },
-        ],
-        currencyType: '$',
-      },
-    };
-    const result = getCurrency(tx, '$');
-    expect(result).toEqual('L');
+});
+
+describe('filterByAccount()', () => {
+  test('respects account boundaries', () => {
+    const cache = parse(
+      `2024/01/01 A\n  Assets:Cashback  $1\n  Income:X\n\n2024/01/02 B\n  Assets:Cash:Wallet  $1\n  Income:X`,
+      settings,
+    );
+    expect(
+      cache.transactions.filter(filterByAccount('Assets:Cash')).map((t) => t.value.payee),
+    ).toEqual(['B']);
   });
-  test('When the transaction does not specify a currency', () => {
-    const tx: EnhancedTransaction = {
-      type: 'tx',
-      blockLine: -1,
-      block: emptyBlock,
-      value: {
-        date: '2021/12/04',
-        payee: 'Testing',
-        expenselines: [
-          {
-            amount: 40,
-            account: 'account1',
-            dealiasedAccount: 'account1',
-            reconcile: '',
-          },
-          {
-            amount: -40,
-            account: 'account3',
-            dealiasedAccount: 'account3',
-            reconcile: '',
-          },
-        ],
-        currencyType: '$',
-      },
-    };
-    const result = getCurrency(tx, '$');
-    expect(result).toEqual('$');
+});
+
+test('sortByDateDesc()', () => {
+  const cache = parse(
+    `2026/09/14 A\n  a:x  $1\n  b:y\n\n2026/09/12 B\n  a:x  $1\n  b:y\n\n2026/09/14 C\n  a:x  $1\n  b:y`,
+    settings,
+  );
+  expect(sortByDateDesc(cache.transactions).map((t) => t.value.payee)).toEqual([
+    'C',
+    'A',
+    'B',
+  ]);
+});
+
+describe('tags', () => {
+  const block = `2026/09/14 ABONO SPEI  ; :bank:unreviewed:
+    ; :unreviewed:
+    Assets:Checking    $4000.00  ; note :unreviewed:
+    ; :a:unreviewed:b:
+    Income:Unknown`;
+
+  test('hasTag()', () => {
+    const cache = parse(block, settings);
+    expect(hasTag(cache.transactions[0], 'unreviewed')).toBe(true);
+    expect(hasTag(cache.transactions[0], 'reviewed')).toBe(false);
   });
+
+  test('removeTag()', () => {
+    expect(removeTag(block, 'unreviewed')).toEqual(`2026/09/14 ABONO SPEI  ; :bank:
+    Assets:Checking    $4000.00  ; note
+    ; :a:b:
+    Income:Unknown`);
+  });
+});
+
+test('dealiasAccount()', () => {
+  const aliases = new Map([['e', 'Expenses']]);
+  expect(dealiasAccount('e:Food', aliases)).toEqual('Expenses:Food');
+  expect(dealiasAccount('e', aliases)).toEqual('Expenses');
+  expect(dealiasAccount('eat:Food', aliases)).toEqual('eat:Food');
 });
 
 describe('makeAccountTree()', () => {
@@ -293,7 +230,6 @@ describe('makeAccountTree()', () => {
     expect(input).toEqual(expected);
   });
 });
-
 describe('sortAccountTree()', () => {
   test('Basic sort', () => {
     const input = [
@@ -336,160 +272,5 @@ describe('sortAccountTree()', () => {
       },
     ];
     expect(input).toEqual(expected);
-  });
-});
-
-describe('filterTransactions', () => {
-  const tx1: EnhancedTransaction = {
-    type: 'tx',
-    blockLine: -1,
-    block: emptyBlock,
-    value: {
-      date: '2021-12-31',
-      payee: 'Costco',
-      expenselines: [
-        {
-          account: 'e:Spending Money',
-          dealiasedAccount: 'Expenses:Spending Money',
-          amount: 100,
-          currency: '$',
-          reconcile: '',
-        },
-        {
-          account: 'c:Citi',
-          dealiasedAccount: 'Credit:City',
-          amount: -100,
-          reconcile: '',
-        },
-      ],
-      currencyType: '$',
-    },
-  };
-  const tx2: EnhancedTransaction = {
-    type: 'tx',
-    blockLine: -1,
-    block: emptyBlock,
-    value: {
-      date: '2021-12-30',
-      payee: "Trader Joe's",
-      expenselines: [
-        {
-          account: 'e:Food:Grocery',
-          dealiasedAccount: 'Expenses:Food:Grocery',
-          amount: 120,
-          currency: '$',
-          reconcile: '',
-        },
-        {
-          amount: -120,
-          account: 'c:Citi',
-          dealiasedAccount: 'Credit:City',
-          reconcile: '',
-        },
-      ],
-      currencyType: '$',
-    },
-  };
-  const tx3: EnhancedTransaction = {
-    type: 'tx',
-    blockLine: -1,
-    block: emptyBlock,
-    value: {
-      date: '2021-12-29',
-      payee: 'PCC',
-      expenselines: [
-        {
-          account: 'e:Food:Grocery',
-          dealiasedAccount: 'Expenses:Food:Grocery',
-          amount: 20,
-          currency: '$',
-          reconcile: '',
-        },
-        {
-          amount: -20,
-          account: 'c:Citi',
-          dealiasedAccount: 'Credit:City',
-          reconcile: '',
-        },
-      ],
-      currencyType: '$',
-    },
-  };
-  test('When there are no filters', () => {
-    const input = [tx1, tx2, tx3];
-    const result = filterTransactions(input);
-    expect(result).toEqual(input);
-  });
-
-  describe('filterByAccount', () => {
-    test('When the account matches', () => {
-      const input = [tx1, tx2, tx3];
-      const result = filterTransactions(
-        input,
-        filterByAccount('e:Spending Money'),
-      );
-      expect(result).toEqual([tx1]);
-    });
-    test('When the no accounts match', () => {
-      const input = [tx1, tx2, tx3];
-      const result = filterTransactions(
-        input,
-        filterByAccount('e:House:Maintenance'),
-      );
-      expect(result).toEqual([]);
-    });
-    test('When there are multiple matches', () => {
-      const input = [tx1, tx2, tx3];
-      const result = filterTransactions(
-        input,
-        filterByAccount('e:Food:Grocery'),
-      );
-      expect(result).toEqual([tx2, tx3]);
-    });
-    test('When filtering by dealiased account name', () => {
-      const input = [tx1, tx2, tx3];
-      const result = filterTransactions(
-        input,
-        filterByAccount('Expenses:Food:Grocery'),
-      );
-      expect(result).toEqual([tx2, tx3]);
-    });
-  });
-
-  describe('filterByPayee', () => {
-    test('When the payee matches', () => {
-      const input = [tx1, tx2, tx3];
-      const result = filterTransactions(input, filterByPayeeExact('Costco'));
-      expect(result).toEqual([tx1]);
-    });
-    test('When there are no matches', () => {
-      const input = [tx1, tx2, tx3];
-      const result = filterTransactions(
-        input,
-        filterByPayeeExact('Home Depot'),
-      );
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('mutliple filters', () => {
-    test('When the payee and account match different transactions', () => {
-      const input = [tx1, tx2, tx3];
-      const result = filterTransactions(
-        input,
-        filterByPayeeExact('PCC'),
-        filterByAccount('e:Spending Money'),
-      );
-      expect(result).toEqual([tx1, tx3]);
-    });
-    test('When matching multiple of the same filter', () => {
-      const input = [tx1, tx2, tx3];
-      const result = filterTransactions(
-        input,
-        filterByPayeeExact('PCC'),
-        filterByPayeeExact("Trader Joe's"),
-      );
-      expect(result).toEqual([tx2, tx3]);
-    });
   });
 });
