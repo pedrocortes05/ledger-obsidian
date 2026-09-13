@@ -1,21 +1,18 @@
 {
-  "include": [ "src/**/*", "tests/**/*" ],
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*"],
   "compilerOptions": {
     "strict": true,
     "baseUrl": ".",
     "allowSyntheticDefaultImports": true,
-    "inlineSources": true,
-    "sourceMap": true,
+    "esModuleInterop": true,
     "jsx": "react",
     "module": "ESNext",
-    "target": "esnext",
+    "target": "ES2020",
     "noImplicitAny": true,
-    "allowJs": true,
     "moduleResolution": "node",
     "importHelpers": true,
-    "lib": [
-      "dom",
-      "esnext"
-    ]
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "lib": ["dom", "ES2021"]
   }
 }

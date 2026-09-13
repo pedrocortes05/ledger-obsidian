@@ -1,123 +1,124 @@
-import { Values } from './EditTransaction';
-import { FieldProps } from 'formik';
+import { countDecimals } from '../amounts';
 import React from 'react';
 import styled from 'styled-components';
 
-const InputWithIconWrapper = styled.div`
-  position: relative;
+const Wrapper = styled.div`
+  display: flex;
+  gap: 4px;
+  align-items: stretch;
+
+  input {
+    flex-grow: 1;
+    min-width: 0;
+    text-align: right;
+  }
+
+  select {
+    flex-shrink: 0;
+    max-width: 9em;
+  }
 `;
 
-const InputWithIcon = styled.input`
-  /* important required to override mobile stylesheet */
-  padding-left: 70px !important;
-  width: 100%;
-`;
+const OTHER = '__other__';
 
-const InputIcon = styled.i`
-  position: absolute;
-  display: block;
-  transform: translate(0, -50%);
-  top: 50%;
-  pointer-events: none;
-  width: 25px;
-  text-align: center;
-  font-style: normal;
-`;
-
-const InputSelect = styled.div`
-  position: absolute;
-  display: flex; /* Allows for flexible content like a dropdown */
-  align-items: center;
-  justify-content: center;
-  transform: translate(0, -50%);
-  top: 50%;
-  pointer-events: auto; /* Allows interaction with dropdown */
-  width: 70px;
-  height: 100%; /* Ensure it aligns with the input */
-`;
-
-const StyledSelect = styled.select`
-  background: transparent;
-  border: none;
-  font-size: 1em;
-  cursor: pointer;
-  outline: none;
-  appearance: none; /* Removes default browser styling */
-  padding: 0 5px;
-  margin: 0;
-  text-align: center;
-  box-shadow: none;
-`;
-
-export const CurrencyInputFormik: React.FC<
-  {
-    currencySymbol: string;
-    placeholder: string | undefined;
-    disabled?: boolean;
-    currencyOptions: { label: string; value: string }[]; // Array of dropdown options
-    currencyID: string;
-  } & FieldProps<string, Values>
-> = (props): JSX.Element => (
-  <CurrencyInput
-    placeholder={props.placeholder || 'Amount'}
-    currencyOptions={props.currencyOptions}
-    currencySymbol={props.currencySymbol}
-    amount={props.field.value}
-    setValue={(newValue: string) => {
-      props.form.setFieldValue(props.field.name, newValue);
-    }}
-    setCurrencyType={(currencyType: string) => {
-      props.form.setFieldValue(props.currencyID || 'currencyType', currencyType);
-    }}
-    disabled={props.disabled || false}
-  />
-);
+/**
+ * normalizeAmountInput pads a typed amount to the minimum number of decimals
+ * without dropping any typed digits. Invalid input is returned unchanged so
+ * validation can report it.
+ */
+export const normalizeAmountInput = (
+  text: string,
+  minDecimals: number,
+): string => {
+  const trimmed = text.trim().replace(/,/g, '');
+  if (!/^-?\d*\.?\d*$/.test(trimmed) || !/\d/.test(trimmed)) {
+    return text.trim();
+  }
+  const decimals = countDecimals(trimmed);
+  if (decimals >= minDecimals) {
+    return trimmed;
+  }
+  const withDot = trimmed.includes('.') ? trimmed : `${trimmed}.`;
+  return withDot.padEnd(withDot.length + minDecimals - decimals, '0');
+};
 
 export const CurrencyInput: React.FC<{
-  placeholder: string;
-  currencyOptions: { label: string; value: string }[];
-  currencySymbol: string;
   amount: string;
-  setValue: (newValue: string) => void;
-  setCurrencyType: (currencyType: string) => void;
-  disabled?: boolean;
-}> = ({
-  placeholder,
-  currencyOptions,
-  currencySymbol,
-  amount,
-  setValue,
-  setCurrencyType,
-  disabled,
-}): JSX.Element => (
-  <InputWithIconWrapper>
-    <InputWithIcon
-      placeholder={placeholder}
-      disabled={disabled || false}
-      type="number"
-      value={amount}
-      onChange={(e) => setValue(e.target.value)}
-      onBlur={() => {
-        const val = amount.length > 0 ? parseFloat(amount).toFixed(2) : '';
-        setValue(val);
-      }}
-    />
-    
-    <InputSelect>
-      <StyledSelect
-        defaultValue={currencyOptions[0]?.value || '$'}
-        onChange={(e) => setCurrencyType(e.target.value)}
-        disabled={disabled || false}
-      >
-        {currencyOptions.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </StyledSelect>
-    </InputSelect>
+  currency: string;
+  commodities: string[];
+  placeholder?: string;
+  minDecimals: (currency: string) => number;
+  onAmountChange: (amount: string) => void;
+  onCurrencyChange: (currency: string) => void;
+  className?: string;
+}> = (props): JSX.Element => {
+  const options = props.commodities.includes(props.currency)
+    ? props.commodities
+    : [props.currency, ...props.commodities];
+  const [customizing, setCustomizing] = React.useState(false);
 
-    {/* <InputIcon>{currencySymbol}</InputIcon> */}
-    {/* AQui arriba va el simbolo de moneda */}
-  </InputWithIconWrapper>
-);
+  return (
+    <Wrapper className={props.className}>
+      <input
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        placeholder={props.placeholder || 'Amount'}
+        value={props.amount}
+        onChange={(e) => props.onAmountChange(e.target.value)}
+        onBlur={() => {
+          if (props.amount !== '') {
+            props.onAmountChange(
+              normalizeAmountInput(
+                props.amount,
+                props.minDecimals(props.currency),
+              ),
+            );
+          }
+        }}
+      />
+      {customizing ? (
+        <input
+          type="text"
+          autoFocus
+          placeholder="e.g. EUR"
+          defaultValue=""
+          style={{ maxWidth: '6em', textAlign: 'left' }}
+          onBlur={(e) => {
+            const value = e.target.value.trim();
+            if (value && !/[\d;@=]/.test(value)) {
+              props.onCurrencyChange(value);
+            }
+            setCustomizing(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+        />
+      ) : (
+        <select
+          className="dropdown"
+          value={props.currency}
+          aria-label="Commodity"
+          onChange={(e) => {
+            if (e.target.value === OTHER) {
+              setCustomizing(true);
+            } else {
+              props.onCurrencyChange(e.target.value);
+            }
+          }}
+        >
+          {options.map((symbol) => (
+            <option key={symbol} value={symbol}>
+              {symbol === '' ? '(none)' : symbol}
+            </option>
+          ))}
+          <option value={OTHER}>Other…</option>
+        </select>
+      )}
+    </Wrapper>
+  );
+};

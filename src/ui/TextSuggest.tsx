@@ -1,32 +1,61 @@
-import { Values } from './EditTransaction';
-import { FieldProps } from 'formik';
 import Fuse from 'fuse.js';
 import React from 'react';
 import { usePopper } from 'react-popper';
 
-// TODO: Consider switching from Fuse to Match-Sorter
-// https://github.com/kentcdodds/match-sorter
+/**
+ * searchSuggestions returns the best matches for the query. Suggestions are
+ * expected to be ranked (most recently used first), which is kept for ties
+ * and for an empty query.
+ */
+export const searchSuggestions = (
+  fuse: Fuse<string>,
+  suggestions: string[],
+  query: string,
+  limit: number,
+): string[] => {
+  const trimmed = query.trim();
+  if (trimmed === '') {
+    return suggestions.slice(0, limit);
+  }
+  const lower = trimmed.toLowerCase();
+  // Substring matches first (keeps "oxxo" finding "COMPRA EN OXXO ARBOLEDA"),
+  // then fuzzy matches.
+  const substring = suggestions.filter((s) => s.toLowerCase().includes(lower));
+  const fuzzy = fuse
+    .search(trimmed, { limit: limit * 2 })
+    .map((result) => result.item)
+    .filter((s) => !substring.includes(s));
+  return [...substring, ...fuzzy].slice(0, limit);
+};
 
-export const TextSuggest: React.FC<
-  {
-    placeholder: string;
-    suggestions: string[];
-    displayCount: number;
-  } & FieldProps<string, Values>
-> = (props): JSX.Element => {
-  const [currentValue, setCurrentValue] = React.useState(props.field.value);
-  const [currentSuggestions, setCurrentSuggestions] = React.useState(
-    props.suggestions.slice(0, props.displayCount),
+export const makeFuse = (suggestions: string[]): Fuse<string> =>
+  new Fuse(suggestions, { threshold: 0.4, ignoreLocation: true });
+
+export const TextSuggest: React.FC<{
+  value: string;
+  onChange: (value: string) => void;
+  /** Called when a suggestion is chosen (click or Enter). */
+  onSelect?: (value: string) => void;
+  suggestions: string[];
+  placeholder?: string;
+  limit?: number;
+  className?: string;
+}> = (props): JSX.Element => {
+  const limit = props.limit ?? 15;
+  const fuse = React.useMemo(
+    () => makeFuse(props.suggestions),
+    [props.suggestions],
   );
-  const [fuse, setFuse] = React.useState(
-    new Fuse(props.suggestions, { threshold: 0.5 }),
+  const [visible, setVisible] = React.useState(false);
+  const [selectedIndex, setSelectedIndex] = React.useState(-1);
+
+  const results = React.useMemo(
+    () => searchSuggestions(fuse, props.suggestions, props.value, limit),
+    [fuse, props.suggestions, props.value, limit],
   );
 
-  const [selectedIndex, setSelectedIndex] = React.useState(0);
-
-  const [visible, setVisibility] = React.useState(false);
   const [referenceElement, setReferenceElement] =
-    React.useState<HTMLElement | null>(null);
+    React.useState<HTMLInputElement | null>(null);
   const [popperElement, setPopperElement] = React.useState<HTMLElement | null>(
     null,
   );
@@ -34,113 +63,105 @@ export const TextSuggest: React.FC<
     placement: 'bottom-start',
   });
 
-  const updateCurrentSuggestions = (newValue: string): void => {
-    const newSuggestions =
-      newValue === ''
-        ? props.suggestions.slice(0, props.displayCount)
-        : fuse
-            .search(newValue)
-            .map((result) => result.item)
-            .slice(0, props.displayCount);
-    setCurrentSuggestions(newSuggestions);
-    setSelectedIndex(Math.min(selectedIndex, newSuggestions.length - 1));
+  const choose = (value: string): void => {
+    props.onChange(value);
+    props.onSelect?.(value);
+    setVisible(false);
+    setSelectedIndex(-1);
   };
 
-  // The Fuse object will not be automatically replaced when the suggestions are
-  // changed so we need to detect and update manually.
-  React.useEffect(() => {
-    setFuse(new Fuse(props.suggestions, { threshold: 0.5 }));
-    updateCurrentSuggestions(currentValue);
-  }, [props.suggestions]);
+  const showList =
+    visible &&
+    results.length > 0 &&
+    !(results.length === 1 && results[0] === props.value);
 
   return (
     <>
       <input
         ref={setReferenceElement}
+        className={props.className}
         type="text"
-        value={currentValue}
+        value={props.value}
         placeholder={props.placeholder}
+        autoComplete="off"
         onChange={(e) => {
-          setVisibility(true);
-          setCurrentValue(e.target.value);
-          updateCurrentSuggestions(e.target.value);
+          props.onChange(e.target.value);
+          setVisible(true);
+          setSelectedIndex(-1);
         }}
         onFocus={() => {
-          setVisibility(true);
-          setSelectedIndex(0);
+          setVisible(true);
+          setSelectedIndex(-1);
         }}
-        onBlur={(e) => {
-          setVisibility(false);
-          setCurrentValue(e.target.value);
-          props.form.setFieldValue(props.field.name, e.target.value);
+        onBlur={() => {
+          setVisible(false);
+          const exact = props.suggestions.find(
+            (s) => s.toLowerCase() === props.value.trim().toLowerCase(),
+          );
+          if (exact !== undefined && props.value.trim() !== '') {
+            choose(exact);
+          }
         }}
         onKeyDown={(e) => {
           switch (e.key) {
-            case 'ArrowUp':
-              setSelectedIndex(
-                Math.clamp(selectedIndex - 1, 0, currentSuggestions.length - 1),
-              );
+            case 'ArrowDown':
+              setVisible(true);
+              setSelectedIndex(Math.min(selectedIndex + 1, results.length - 1));
               e.preventDefault();
               return;
-            case 'ArrowDown':
-              setSelectedIndex(
-                Math.clamp(selectedIndex + 1, 0, currentSuggestions.length - 1),
-              );
+            case 'ArrowUp':
+              setSelectedIndex(Math.max(selectedIndex - 1, -1));
               e.preventDefault();
               return;
             case 'Enter':
-              setCurrentValue(currentSuggestions[selectedIndex]);
-              props.form.setFieldValue(
-                props.field.name,
-                currentSuggestions[selectedIndex],
-              );
-              setVisibility(false);
               e.preventDefault();
+              if (
+                showList &&
+                selectedIndex >= 0 &&
+                selectedIndex < results.length
+              ) {
+                choose(results[selectedIndex]);
+              } else {
+                // Keep what was typed, even if nothing matches.
+                setVisible(false);
+              }
+              return;
+            case 'Escape':
+              if (showList) {
+                e.preventDefault();
+                e.stopPropagation();
+                setVisible(false);
+              }
               return;
           }
         }}
       />
 
-      {visible ? (
+      {showList ? (
         <div
-          className="suggestion-container"
+          className="suggestion-container ledger-suggestion-container"
           ref={setPopperElement}
           style={styles.popper}
           {...attributes.popper}
         >
-          {currentSuggestions.map((s, i) => (
-            <Suggestion
-              value={s}
+          {results.map((s, i) => (
+            <div
               key={s}
-              selected={i === selectedIndex}
-              onClick={() => {
-                setCurrentValue(s);
-                props.form.setFieldValue(props.field.name, s);
-                setCurrentValue(s);
-                setVisibility(false);
+              className={
+                'suggestion-item' + (i === selectedIndex ? ' is-selected' : '')
+              }
+              onMouseDown={(e) => {
+                // Keep focus in the input so blur does not fire first.
+                e.preventDefault();
+                choose(s);
               }}
-              onHover={() => {
-                setSelectedIndex(i);
-              }}
-            />
+              onMouseOver={() => setSelectedIndex(i)}
+            >
+              {s}
+            </div>
           ))}
         </div>
       ) : null}
     </>
   );
 };
-
-const Suggestion: React.FC<{
-  value: string;
-  selected: boolean;
-  onClick: () => void;
-  onHover: () => void;
-}> = ({ value, selected, onClick, onHover }): JSX.Element => (
-  <div
-    className={'suggestion-item ' + (selected ? 'is-selected' : '')}
-    onMouseDown={onClick}
-    onMouseOver={onHover}
-  >
-    {value}
-  </div>
-);

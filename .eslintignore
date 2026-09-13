@@ -1,2 +1,5 @@
 main.js
-grammar/ledger.ts
+node_modules
+esbuild.config.mjs
+.eslintrc.js
+jest.config.js

@@ -3,59 +3,60 @@ import { TransactionCache } from '../parser';
 import React from 'react';
 import styled from 'styled-components';
 
-const ErrorDiv = styled.div`
+const Wrapper = styled.details`
   color: var(--text-error);
   background: var(--background-secondary);
-  padding: 10px;
-  margin: 10px 10px 10px 0;
-  cursor: pointer;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 0 0 12px;
+
+  summary {
+    cursor: pointer;
+  }
+
+  li {
+    margin: 8px 0;
+    color: var(--text-normal);
+  }
+
+  pre {
+    background: var(--background-primary-alt);
+    padding: 8px;
+    overflow-x: auto;
+    white-space: pre;
+  }
 `;
-const ErrorDetailsDiv = styled.div`
-  background: var(--background-primary-alt);
-  padding: 20px;
-  margin: 10px;
-`;
+
+const blockOf = (error: Error): { firstLine: number; block: string } =>
+  'transaction' in error ? error.transaction.block : error.block;
 
 export const ParseErrors: React.FC<{
   txCache: TransactionCache;
-}> = (props): JSX.Element => (
-  <div>
-    {props.txCache.parsingErrors.map((error: Error, i) => (
-      <ErrorDetail key={i} error={error} />
-    ))}
-  </div>
-);
-
-const ErrorDetail: React.FC<{
-  error: Error;
-}> = (props): JSX.Element => {
-  const [expanded, setExpanded] = React.useState(false);
-
-  const expandedDetails =
-    'transaction' in props.error ? (
-      <>
-        <p>The erroneous transaction:</p>
-        <pre>
-          {props.error.transaction.block
-            ? props.error.transaction.block.block
-            : `${props.error.transaction.value.date} ${props.error.transaction.value.payee}`}
-        </pre>
-      </>
-    ) : (
-      <>
-        <p>The erroneous transaction:</p>
-        <pre>{props.error.block.block}</pre>
-      </>
-    );
-
+}> = (props): JSX.Element | null => {
+  const errors = props.txCache.parsingErrors;
+  if (errors.length === 0) {
+    return null;
+  }
   return (
-    <ErrorDiv
-      onClick={() => {
-        setExpanded(!expanded);
-      }}
-    >
-      Parsing Error: {props.error.message}
-      {expanded ? <ErrorDetailsDiv>{expandedDetails}</ErrorDetailsDiv> : null}
-    </ErrorDiv>
+    <Wrapper>
+      <summary>
+        {errors.length === 1
+          ? '1 problem in the ledger file'
+          : `${errors.length} problems in the ledger file`}{' '}
+        — balances may be incomplete
+      </summary>
+      <ul>
+        {errors.slice(0, 100).map((error, i) => {
+          const block = blockOf(error);
+          return (
+            <li key={i}>
+              <strong>Line {block.firstLine + 1}:</strong> {error.message}
+              <pre>{block.block}</pre>
+            </li>
+          );
+        })}
+      </ul>
+      {errors.length > 100 ? <p>…and {errors.length - 100} more.</p> : null}
+    </Wrapper>
   );
 };

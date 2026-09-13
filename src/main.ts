@@ -1,21 +1,20 @@
 import { getTransactionCache, LedgerModifier } from './file-interface';
 import { billIcon } from './graphics';
 import { LedgerView, LedgerViewType } from './ledgerview';
-import type { TransactionCache } from './parser';
+import { parse, TransactionCache } from './parser';
+import { parsePrefillParams, TransactionPrefill } from './prefill';
 import { ISettings, settingsWithDefaults } from './settings';
 import { SettingsTab } from './settings-tab';
 import type { default as MomentType } from 'moment';
-import { around } from 'monkey-around';
 import {
   addIcon,
+  debounce,
   MarkdownView,
-  Menu,
   Notice,
   ObsidianProtocolData,
   Plugin,
   TAbstractFile,
   TFile,
-  ViewState,
 } from 'obsidian';
 
 declare global {
@@ -25,91 +24,93 @@ declare global {
 }
 
 export default class LedgerPlugin extends Plugin {
-  // @ts-ignore  - Not initialized in the constructor due to how Obsidian
-  // plugins are initialized.
-  public settings: ISettings;
+  // Not initialized in the constructor due to how Obsidian plugins are
+  // initialized.
+  public settings!: ISettings;
 
-  // @ts-ignore  - Not initialized in the constructor due to how Obsidian
-  // plugins are initialized.
-  public txCache: TransactionCache;
+  /** Always defined; empty until the ledger file has been parsed. */
+  public txCache!: TransactionCache;
 
-  // @ts-ignore  - Not initialized in the constructor due to how Obsidian
-  // plugins are initialized.
-  private txCacheSubscriptions: ((txCache: TransactionCache) => void)[];
+  private txCacheSubscriptions: ((txCache: TransactionCache) => void)[] = [];
+
+  private readonly scheduleCacheUpdate = debounce(
+    () => this.updateTransactionCache(),
+    300,
+    true,
+  );
 
   public async onload(): Promise<void> {
-    console.log('ledger: Loading plugin v' + this.manifest.version);
-
-    this.txCacheSubscriptions = [];
-
     await this.loadSettings();
+    this.txCache = parse('', this.settings);
     this.addSettingTab(new SettingsTab(this));
 
     addIcon('ledger', billIcon);
-    this.addRibbonIcon('ledger', 'Add to Ledger', async () => {
-      const ledgerFile = await this.createLedgerFileIfMissing();
-      new LedgerModifier(this, ledgerFile).openExpenseModal('new');
-    });
+    this.addRibbonIcon('ledger', 'Add to Ledger', () =>
+      this.openAddTransaction(),
+    );
 
     this.registerObsidianProtocolHandler('ledger', this.handleProtocolAction);
 
     this.registerView(LedgerViewType, (leaf) => new LedgerView(leaf, this));
-
     this.registerExtensions(['ledger'], LedgerViewType);
 
     this.registerEvent(
       this.app.vault.on('modify', (file: TAbstractFile) => {
         if (file.path === this.settings.ledgerFile) {
-          this.updateTransactionCache();
+          this.scheduleCacheUpdate();
+        }
+      }),
+    );
+    this.registerEvent(
+      this.app.vault.on('create', (file: TAbstractFile) => {
+        if (file.path === this.settings.ledgerFile) {
+          this.scheduleCacheUpdate();
+        }
+      }),
+    );
+    this.registerEvent(
+      this.app.vault.on('delete', (file: TAbstractFile) => {
+        if (file.path === this.settings.ledgerFile) {
+          this.scheduleCacheUpdate();
+        }
+      }),
+    );
+    this.registerEvent(
+      this.app.vault.on('rename', (file: TAbstractFile, oldPath: string) => {
+        if (
+          oldPath === this.settings.ledgerFile &&
+          file.path.endsWith('.ledger')
+        ) {
+          this.settings.ledgerFile = file.path;
+          this.saveSettings();
         }
       }),
     );
 
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    const self = this;
-    /*
-    let addedOnce = false;
-    this.register(
-      around(MarkdownView.prototype, {
-        addAction(next) {
-          return function (icon, title, callback) {
-            console.log('Add actions called: ' + title);
-            if (!addedOnce) {
-              addedOnce = true;
-              this.addAction('ledger', 'testing', () => {
-                console.log('clicked!');
+    this.registerEvent(
+      this.app.workspace.on('file-menu', (menu, file, source, leaf) => {
+        if (
+          !(file instanceof TFile) ||
+          file.extension !== 'ledger' ||
+          leaf?.view.getViewType() === LedgerViewType
+        ) {
+          return;
+        }
+        menu.addItem((item) =>
+          item
+            .setTitle('Open as Ledger dashboard')
+            .setIcon('ledger')
+            .onClick(() => {
+              const target =
+                source === 'more-options' && leaf?.view instanceof MarkdownView
+                  ? leaf
+                  : this.app.workspace.getLeaf(false);
+              target.setViewState({
+                type: LedgerViewType,
+                state: { file: file.path },
               });
-            }
-            return next.call(icon, title, callback);
-          };
-        },
-      }),
-    );
-    */
-    this.register(
-      around(MarkdownView.prototype, {
-        onMoreOptionsMenu(next) {
-          return function (this: MarkdownView, menu: Menu) {
-            if (this.file.path === self.settings.ledgerFile) {
-              menu
-                .addItem((item) => {
-                  item
-                    .setTitle('Open as Ledger file')
-                    .setIcon('ledger')
-                    .onClick(() => {
-                      const state = this.leaf.view.getState();
-                      this.leaf.setViewState({
-                        type: LedgerViewType,
-                        state: { file: state.file },
-                        popstate: true,
-                      } as ViewState);
-                    });
-                })
-                .addSeparator();
-            }
-            next.call(this, menu);
-          };
-        },
+            }),
+        );
       }),
     );
 
@@ -117,10 +118,7 @@ export default class LedgerPlugin extends Plugin {
       id: 'ledger-add-transaction',
       name: 'Add to Ledger',
       icon: 'ledger',
-      callback: async () => {
-        const ledgerFile = await this.createLedgerFileIfMissing();
-        new LedgerModifier(this, ledgerFile).openExpenseModal('new');
-      },
+      callback: () => this.openAddTransaction(),
     });
 
     this.addCommand({
@@ -163,13 +161,13 @@ export default class LedgerPlugin extends Plugin {
   public deregisterTxCacheSubscription = (
     fn: (txCache: TransactionCache) => void,
   ): void => {
-    this.txCacheSubscriptions.remove(fn);
+    this.txCacheSubscriptions = this.txCacheSubscriptions.filter(
+      (subscription) => subscription !== fn,
+    );
   };
 
   public readonly createLedgerFileIfMissing = async (): Promise<TFile> => {
-    let ledgerTFile = this.app.vault
-      .getFiles()
-      .find((file) => file.path === this.settings.ledgerFile);
+    let ledgerTFile = this.app.vault.getFileByPath(this.settings.ledgerFile);
     if (!ledgerTFile) {
       ledgerTFile = await this.app.vault.create(
         this.settings.ledgerFile,
@@ -180,24 +178,36 @@ export default class LedgerPlugin extends Plugin {
     return ledgerTFile;
   };
 
+  public async openAddTransaction(prefill?: TransactionPrefill): Promise<void> {
+    const ledgerFile = await this.createLedgerFileIfMissing();
+    new LedgerModifier(this, ledgerFile).openExpenseModal(
+      'new',
+      undefined,
+      prefill,
+    );
+  }
+
+  /**
+   * saveSettings persists the settings and re-parses the ledger file, since
+   * the file path and account prefixes affect the cache.
+   */
+  public async saveSettings(): Promise<void> {
+    await this.saveData(this.settings);
+    await this.updateTransactionCache();
+  }
+
   private async loadSettings(): Promise<void> {
     this.settings = settingsWithDefaults(await this.loadData());
-    this.saveData(this.settings);
   }
 
   private readonly openLedgerDashboard = async (): Promise<void> => {
-    let leaf = this.app.workspace.activeLeaf;
-    if (!leaf) {
-      new Notice('Unable to find active leaf');
-      return;
-    }
-
-    if (leaf.getViewState().pinned) {
-      leaf = this.app.workspace.splitActiveLeaf('horizontal');
-    }
-
     const ledgerTFile = await this.createLedgerFileIfMissing();
-    leaf.openFile(ledgerTFile);
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf.setViewState({
+      type: LedgerViewType,
+      state: { file: ledgerTFile.path },
+      active: true,
+    });
   };
 
   private readonly generateLedgerFileExampleContent = (): string =>
@@ -213,7 +223,7 @@ alias i=${this.settings.incomeAccountsPrefix}
 ; This is an example of what a transaction looks like.
 ; Every transaction must balance to 0 if you add up all the lines.
 ; If the last line is left empty, it will automatically balance the transaction.
-; 
+;
 ; 2021-12-25 Starbucks Coffee
 ;     e:Food:Treats     $5.25   ; To this account
 ;     c:Chase                           ; From this account
@@ -222,30 +232,23 @@ alias i=${this.settings.incomeAccountsPrefix}
 ; This only needs to be done once, and enables you to reconcile your
 ; Ledger file with your bank account statements.
 
-${window.moment().format('YYYY-MM-DD')} Starting Balances
+${window.moment().format('YYYY/MM/DD')} Starting Balances
     ; Add a line for each bank account or credit card
     c:Chase                   $-250.45
     b:BankOfAmerica    $450.27
-    StartingBalance      ; Leave this line alone
+    Equity:StartingBalance      ; Leave this line alone
 
 ; I highly recommend reading through the Ledger documentation about the basics
 ; of accounting with Ledger
 ;     https://www.ledger-cli.org/3.0/doc/ledger3.html#Principles-of-Accounting-with-Ledger
 
 ; Lots more information about this format can be found on the
-; Ledger CLI homepage. Please note however that not quite all
-; of the Ledger CLI functionality is supported by this plugin.
+; Ledger CLI homepage.
 ;     https://www.ledger-cli.org
 
 ; You can add transactions here easily using the "Add to Ledger"
 ; Command in Obsidian. You can even make a shortcut to it on your
 ; mobile phone homescreen. See the README for more information.
-
-; If you have questions, please use the Github discussions:
-;     https://github.com/tgrosinger/ledger-obsidian/discussions/landing
-; If you encounter issues, please search the existing Github issues,
-; and create a new one if your issue has not already been solved.
-;     https://github.com/tgrosinger/ledger-obsidian/issues
 `;
 
   /**
@@ -254,13 +257,19 @@ ${window.moment().format('YYYY-MM-DD')} Starting Balances
    * be replaced. Subscriptions will be notified with the new txCache.
    */
   private readonly updateTransactionCache = async (): Promise<void> => {
-    console.debug('ledger: Updating the transaction cache');
-    this.txCache = await getTransactionCache(
-      this.app.metadataCache,
-      this.app.vault,
-      this.settings,
-      this.settings.ledgerFile,
-    );
+    try {
+      this.txCache = await getTransactionCache(
+        this.app.vault,
+        this.settings,
+        this.settings.ledgerFile,
+      );
+    } catch (error) {
+      console.error('ledger: failed to parse the ledger file', error);
+      new Notice(
+        'Ledger: failed to read the ledger file. See the console for details.',
+      );
+      return;
+    }
 
     this.txCacheSubscriptions.forEach((fn) => fn(this.txCache));
   };
@@ -268,9 +277,6 @@ ${window.moment().format('YYYY-MM-DD')} Starting Balances
   private readonly handleProtocolAction = async (
     params: ObsidianProtocolData,
   ): Promise<void> => {
-    // TODO: Support pre-populating fields, or even completely skipping the form
-    // by passing the correct data here.
-    const ledgerFile = await this.createLedgerFileIfMissing();
-    new LedgerModifier(this, ledgerFile).openExpenseModal('new');
+    await this.openAddTransaction(parsePrefillParams(params));
   };
 }

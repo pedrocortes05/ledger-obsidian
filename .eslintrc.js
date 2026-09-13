@@ -73,7 +73,7 @@ module.exports = {
     "@typescript-eslint/no-unused-expressions": "error",
     "@typescript-eslint/prefer-function-type": "error",
     "@typescript-eslint/prefer-readonly": "error",
-    "@typescript-eslint/quotes": ["error", "single", { avoidEscape: true }],
+    quotes: ["error", "single", { avoidEscape: true, allowTemplateLiterals: true }],
     "arrow-body-style": ["error", "as-needed"],
     "constructor-super": "error",
     curly: ["error", "multi-line"],

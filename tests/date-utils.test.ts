@@ -1,148 +1,79 @@
-import { bucketTransactions, makeBucketNames } from '../src/date-utils';
-import { EnhancedTransaction, FileBlock } from '../src/parser';
-import * as moment from 'moment';
+import { makeBuckets, presetRange, suggestInterval } from '../src/date-utils';
+import moment from 'moment';
 
-window.moment = moment;
-
-const emptyBlock: FileBlock = {
-  firstLine: -1,
-  lastLine: -1,
-  block: '',
-};
-
-describe('makeBucketNames()', () => {
-  describe('week', () => {
-    test('less than a week', () => {
-      const result = makeBucketNames(
-        'week',
-        moment('2021-12-01'),
-        moment('2021-12-03'),
-      );
-      expect(result).toEqual(['2021-12-01']);
-    });
-    test('exactly a week', () => {
-      const result = makeBucketNames(
-        'week',
-        moment('2021-12-01'),
-        moment('2021-12-07'),
-      );
-      expect(result).toEqual(['2021-12-01']);
-    });
-    test('exactly 8 days', () => {
-      const result = makeBucketNames(
-        'week',
-        moment('2021-12-01'),
-        moment('2021-12-08'),
-      );
-      expect(result).toEqual(['2021-12-01', '2021-12-08']);
-    });
-    test('longer', () => {
-      const result = makeBucketNames(
-        'week',
-        moment('2021-11-01'),
-        moment('2021-12-08'),
-      );
-      expect(result).toEqual([
-        '2021-11-01',
-        '2021-11-08',
-        '2021-11-15',
-        '2021-11-22',
-        '2021-11-29',
-        '2021-12-06',
-      ]);
-    });
+describe('makeBuckets()', () => {
+  test('months are calendar aligned and clipped to the range', () => {
+    expect(
+      makeBuckets('month', moment('2021-11-15'), moment('2022-01-10')),
+    ).toEqual([
+      { startISO: '2021-11-15', endISO: '2021-11-30' },
+      { startISO: '2021-12-01', endISO: '2021-12-31' },
+      { startISO: '2022-01-01', endISO: '2022-01-10' },
+    ]);
   });
-  describe('month', () => {
-    test('less than a month', () => {
-      const result = makeBucketNames(
-        'month',
-        moment('2021-12-01'),
-        moment('2021-12-03'),
-      );
-      expect(result).toEqual(['2021-12-01']);
-    });
-    test('slightly over a month', () => {
-      const result = makeBucketNames(
-        'month',
-        moment('2021-12-01'),
-        moment('2022-01-01'),
-      );
-      expect(result).toEqual(['2021-12-01', '2022-01-01']);
-    });
+
+  test('single day range', () => {
+    expect(
+      makeBuckets('week', moment('2021-12-01'), moment('2021-12-01')),
+    ).toEqual([{ startISO: '2021-12-01', endISO: '2021-12-01' }]);
+  });
+
+  test('days', () => {
+    expect(
+      makeBuckets('day', moment('2021-12-30'), moment('2022-01-01')).map(
+        (b) => b.endISO,
+      ),
+    ).toEqual(['2021-12-30', '2021-12-31', '2022-01-01']);
+  });
+
+  test('end before start', () => {
+    expect(
+      makeBuckets('day', moment('2022-01-02'), moment('2022-01-01')),
+    ).toEqual([]);
+  });
+
+  test('does not mutate the inputs', () => {
+    const start = moment('2021-01-01');
+    const end = moment('2021-03-01');
+    makeBuckets('month', start, end);
+    expect(start.format('YYYY-MM-DD')).toEqual('2021-01-01');
+    expect(end.format('YYYY-MM-DD')).toEqual('2021-03-01');
   });
 });
 
-describe('bucketTransaction()', () => {
-  const tx1: EnhancedTransaction = {
-    type: 'tx',
-    blockLine: -1,
-    block: emptyBlock,
-    value: {
-      date: '2021-12-31',
-      payee: 'Costco',
-      expenselines: [],
-    },
-  };
-  const tx2: EnhancedTransaction = {
-    type: 'tx',
-    blockLine: -1,
-    block: emptyBlock,
-    value: {
-      date: '2021-12-15',
-      payee: "Trader Joe's",
-      expenselines: [],
-      currencyType: '$',
-    },
-  };
-  const tx3: EnhancedTransaction = {
-    type: 'tx',
-    blockLine: -1,
-    block: emptyBlock,
-    value: {
-      date: '2021-11-29',
-      payee: 'PCC',
-      expenselines: [],
-      currencyType: '$',
-    },
-  };
-  test('when there is only one bucket', () => {
-    const result = bucketTransactions(['2021-11-15'], [tx1, tx2, tx3]);
-    const entries = [...result.entries()];
-    expect(entries).toEqual([[moment('2021-11-15'), [tx1, tx2, tx3]]]);
-  });
-  test('when a transaction is past the last bucket', () => {
-    const result = bucketTransactions(
-      ['2021-11-15', '2021-12-01'],
-      [tx1, tx2, tx3],
+describe('presetRange()', () => {
+  test('all time spans from the first to the last transaction', () => {
+    const range = presetRange(
+      'all-time',
+      moment('2020-05-05'),
+      moment('2999-01-01'),
     );
-    const entries = [...result.entries()];
-    expect(entries).toEqual([
-      [moment('2021-11-15'), [tx3]],
-      [moment('2021-12-01'), [tx1, tx2]],
-    ]);
+    expect(range.start.format('YYYY-MM-DD')).toEqual('2020-05-05');
+    expect(range.end.format('YYYY-MM-DD')).toEqual('2999-01-01');
   });
-  test('when there is a transaction exactly on a bucket date', () => {
-    const result = bucketTransactions(
-      ['2021-11-15', '2021-12-01', '2021-12-15'],
-      [tx1, tx2, tx3],
+
+  test('year to date ends today when there are no future transactions', () => {
+    const range = presetRange(
+      'ytd',
+      moment('2020-01-01'),
+      moment('2020-01-02'),
     );
-    const entries = [...result.entries()];
-    expect(entries).toEqual([
-      [moment('2021-11-15'), [tx3]],
-      [moment('2021-12-01'), []],
-      [moment('2021-12-15'), [tx1, tx2]],
-    ]);
+    expect(range.start.format('MM-DD')).toEqual('01-01');
+    expect(range.end.isSame(moment(), 'day')).toBe(true);
   });
-  test('when there is a transaction right before a bucket date', () => {
-    const result = bucketTransactions(
-      ['2021-11-15', '2021-12-01', '2021-12-16'],
-      [tx1, tx2, tx3],
-    );
-    const entries = [...result.entries()];
-    expect(entries).toEqual([
-      [moment('2021-11-15'), [tx3]],
-      [moment('2021-12-01'), [tx2]],
-      [moment('2021-12-16'), [tx1]],
-    ]);
-  });
+});
+
+test('suggestInterval()', () => {
+  expect(suggestInterval(moment('2024-01-01'), moment('2024-01-20'))).toEqual(
+    'day',
+  );
+  expect(suggestInterval(moment('2024-01-01'), moment('2024-05-01'))).toEqual(
+    'week',
+  );
+  expect(suggestInterval(moment('2021-01-01'), moment('2024-01-01'))).toEqual(
+    'month',
+  );
+  expect(suggestInterval(moment('2010-01-01'), moment('2024-01-01'))).toEqual(
+    'year',
+  );
 });
