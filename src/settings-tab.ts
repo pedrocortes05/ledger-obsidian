@@ -9,11 +9,7 @@ type StringSetting = {
 
 export class SettingsTab extends PluginSettingTab {
   private readonly plugin: LedgerPlugin;
-  private readonly save = debounce(
-    () => this.plugin.saveSettings(),
-    500,
-    true,
-  );
+  private readonly save = debounce(() => this.plugin.saveSettings(), 500, true);
 
   constructor(plugin: LedgerPlugin) {
     super(plugin.app, plugin);
@@ -61,7 +57,7 @@ export class SettingsTab extends PluginSettingTab {
 
     containerEl.createEl('p', {
       cls: 'setting-item-description',
-      text: "Ledger uses accounts to group expense types. Accounts are grouped into a hierarchy by separating with a colon. For example 'Expenses:Food:Grocery' and 'Expenses:Food:Restaurants'. If you use aliases in your ledger file, use the unaliased prefix, e.g. \"Assets\" instead of \"a\". Virtual accounts are detected from their parentheses.",
+      text: 'Ledger uses accounts to group expense types. Accounts are grouped into a hierarchy by separating with a colon. For example \'Expenses:Food:Grocery\' and \'Expenses:Food:Restaurants\'. If you use aliases in your ledger file, use the unaliased prefix, e.g. "Assets" instead of "a". Virtual accounts are detected from their parentheses.',
     });
 
     this.addTextSetting(

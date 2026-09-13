@@ -70,13 +70,19 @@ export class LedgerModifier {
    * addTransaction inserts the transaction after the last transaction dated
    * on or before it.
    */
-  public async addTransaction(txText: string, dateISO: string): Promise<boolean> {
+  public async addTransaction(
+    txText: string,
+    dateISO: string,
+  ): Promise<boolean> {
     return this.process((contents) =>
       insertTransaction(contents, txText, dateISO),
     );
   }
 
-  public async removeTag(tx: EnhancedTransaction, tag: string): Promise<boolean> {
+  public async removeTag(
+    tx: EnhancedTransaction,
+    tag: string,
+  ): Promise<boolean> {
     return this.process((contents) =>
       replaceBlock(contents, tx.block, removeTag(tx.block.block, tag)),
     );
@@ -91,7 +97,9 @@ export class LedgerModifier {
         new Notice(error.message);
       } else {
         console.error('ledger: failed to update the ledger file', error);
-        new Notice('Ledger: failed to update the ledger file. See the console for details.');
+        new Notice(
+          'Ledger: failed to update the ledger file. See the console for details.',
+        );
       }
       return false;
     }

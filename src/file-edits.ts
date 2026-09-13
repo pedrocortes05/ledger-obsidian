@@ -126,7 +126,11 @@ export const insertTransaction = (
       continue;
     }
     let end = i;
-    while (end + 1 < lines.length && /^[ \t]/.test(lines[end + 1]) && !isBlank(lines[end + 1])) {
+    while (
+      end + 1 < lines.length &&
+      /^[ \t]/.test(lines[end + 1]) &&
+      !isBlank(lines[end + 1])
+    ) {
       end++;
     }
     if (firstTxLine === -1) {
@@ -152,7 +156,8 @@ export const insertTransaction = (
     // Every transaction is later: insert before the first one.
     const before = lines.slice(0, firstTxLine);
     const after = lines.slice(firstTxLine);
-    const separator = before.length > 0 && !isBlank(before[before.length - 1]) ? [''] : [];
+    const separator =
+      before.length > 0 && !isBlank(before[before.length - 1]) ? [''] : [];
     return [...before, ...separator, ...txLines, '', ...after].join(eol);
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "ledger-obsidian-pedro",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Plain text accounting",
   "main": "main.js",
   "scripts": {
@@ -9,9 +9,10 @@
     "typecheck": "tsc --noEmit --skipLibCheck",
     "test": "jest",
     "test-watch": "jest --watchAll",
-    "prettier": "prettier --write \"src/**/*.+(ts|tsx|json|html|css)\" \"tests/**/*.ts\"",
+    "prettier": "prettier --write \"src/**/*.{ts,tsx}\" \"tests/**/*.{ts,tsx}\" \"scripts/**/*.ts\"",
     "eslint": "eslint . --ext .ts,.tsx --fix",
-    "check-ledger": "esbuild scripts/check-ledger.ts --bundle --platform=node --outfile=node_modules/.cache/check-ledger.js --log-level=warning && node node_modules/.cache/check-ledger.js"
+    "check-ledger": "esbuild scripts/check-ledger.ts --bundle --platform=node --outfile=node_modules/.cache/check-ledger.js --log-level=warning && node node_modules/.cache/check-ledger.js",
+    "lint": "eslint . --ext .ts,.tsx"
   },
   "keywords": [],
   "author": "Pedro Cortes",
@@ -23,12 +24,12 @@
     "@types/react": "17.0.37",
     "@types/react-dom": "17.0.11",
     "@types/styled-components": "5.1.15",
-    "@typescript-eslint/eslint-plugin": "4.6.0",
-    "@typescript-eslint/parser": "4.6.0",
+    "@typescript-eslint/eslint-plugin": "8.46.2",
+    "@typescript-eslint/parser": "8.46.2",
     "esbuild": "0.28.2",
-    "eslint": "7.12.1",
-    "eslint-plugin-import": "2.22.1",
-    "eslint-plugin-jsdoc": "30.7.3",
+    "eslint": "8.57.1",
+    "eslint-plugin-import": "2.32.0",
+    "eslint-plugin-jsdoc": "50.8.0",
     "eslint-plugin-prefer-arrow": "1.2.2",
     "eslint-plugin-simple-import-sort": "5.0.3",
     "jest": "29.7.0",
@@ -36,6 +37,7 @@
     "jest-mock-extended": "1.0.10",
     "moment": "2.29.1",
     "obsidian": "1.13.1",
+    "prettier": "3.6.2",
     "ts-jest": "29.4.5",
     "typescript": "5.9.3"
   },

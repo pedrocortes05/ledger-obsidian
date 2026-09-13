@@ -139,7 +139,13 @@ const ExpenseLine: React.FC<{
   const [showMemo, setShowMemo] = React.useState(line.comment !== '');
   const suggestions = React.useMemo(
     () => accountSuggestions(props.values, props.index, props.txCache),
-    [props.values.txType, props.values.lines.length, line.virtual, props.index, props.txCache],
+    [
+      props.values.txType,
+      props.values.lines.length,
+      line.virtual,
+      props.index,
+      props.txCache,
+    ],
   );
   const placeholder =
     balancingAmount(props.values, props.index, props.txCache) ?? 'Amount';
@@ -166,7 +172,9 @@ const ExpenseLine: React.FC<{
           placeholder={placeholder}
           minDecimals={(currency) => minDecimalsFor(props.txCache, currency)}
           onAmountChange={(amount) => props.update(props.index, { amount })}
-          onCurrencyChange={(currency) => props.update(props.index, { currency })}
+          onCurrencyChange={(currency) =>
+            props.update(props.index, { currency })
+          }
         />
         <button
           type="button"
@@ -195,7 +203,9 @@ const ExpenseLine: React.FC<{
             type="text"
             placeholder="Memo"
             value={line.comment}
-            onChange={(e) => props.update(props.index, { comment: e.target.value })}
+            onChange={(e) =>
+              props.update(props.index, { comment: e.target.value })
+            }
           />
         </div>
       ) : null}
@@ -233,7 +243,9 @@ export const EditTransaction: React.FC<{
   const [errors, setErrors] = React.useState<ValueErrors>({});
   const [page, setPage] = React.useState(1);
   const [submitting, setSubmitting] = React.useState(false);
-  const [autofillSource, setAutofillSource] = React.useState<string | null>(null);
+  const [autofillSource, setAutofillSource] = React.useState<string | null>(
+    null,
+  );
   const seed = React.useRef<string | undefined>(
     initial.values.lines[0]?.amount === initial.values.total
       ? initial.values.total
@@ -251,7 +263,9 @@ export const EditTransaction: React.FC<{
   const updateLine = (index: number, changes: Partial<Line>): void =>
     setValues((current) => ({
       ...current,
-      lines: current.lines.map((line, i) => (i === index ? { ...line, ...changes } : line)),
+      lines: current.lines.map((line, i) =>
+        i === index ? { ...line, ...changes } : line,
+      ),
     }));
 
   const removeLine = (index: number): void =>
@@ -262,7 +276,10 @@ export const EditTransaction: React.FC<{
 
   const addLine = (virtual: boolean): void =>
     setValues((current) => {
-      const line = makeLine({ currency: current.currency, virtual: virtual ? '(' : '' });
+      const line = makeLine({
+        currency: current.currency,
+        virtual: virtual ? '(' : '',
+      });
       const lines = [...current.lines];
       // New splits go before the paying account; budget lines go at the end
       // of the real postings, like the existing file.
@@ -276,9 +293,10 @@ export const EditTransaction: React.FC<{
     }
     const result = autofillFromPayee(values, payee, ctx);
     if (result) {
-      seed.current = result.values.lines[0]?.amount === result.values.total
-        ? result.values.total
-        : undefined;
+      seed.current =
+        result.values.lines[0]?.amount === result.values.total
+          ? result.values.total
+          : undefined;
       setValues(result.values);
       setAutofillSource(result.source.value.date);
     }
@@ -324,7 +342,9 @@ export const EditTransaction: React.FC<{
     }
   };
 
-  const realLineCount = values.lines.filter((line) => line.virtual === '').length;
+  const realLineCount = values.lines.filter(
+    (line) => line.virtual === '',
+  ).length;
 
   return (
     <FormStyles>
@@ -372,7 +392,9 @@ export const EditTransaction: React.FC<{
                   suggestions={payeeSuggestions}
                   placeholder="Payee (e.g. Obsidian.md)"
                 />
-                {errors.payee ? <div className="ledger-error">{errors.payee}</div> : null}
+                {errors.payee ? (
+                  <div className="ledger-error">{errors.payee}</div>
+                ) : null}
                 {autofillSource ? (
                   <div className="ledger-hint">
                     Filled in from the {autofillSource} transaction.{' '}
@@ -399,7 +421,9 @@ export const EditTransaction: React.FC<{
                   currency={values.currency}
                   commodities={commodities}
                   placeholder="Total amount"
-                  minDecimals={(currency) => minDecimalsFor(props.txCache, currency)}
+                  minDecimals={(currency) =>
+                    minDecimalsFor(props.txCache, currency)
+                  }
                   onAmountChange={(total) => set({ total })}
                   onCurrencyChange={(currency) => set({ currency })}
                 />
@@ -412,8 +436,12 @@ export const EditTransaction: React.FC<{
                 />
               </div>
             </div>
-            {errors.total ? <div className="ledger-error">{errors.total}</div> : null}
-            {errors.date ? <div className="ledger-error">{errors.date}</div> : null}
+            {errors.total ? (
+              <div className="ledger-error">{errors.total}</div>
+            ) : null}
+            {errors.date ? (
+              <div className="ledger-error">{errors.date}</div>
+            ) : null}
 
             <div className="ledger-actions">
               <button type="button" onClick={props.close}>
@@ -438,7 +466,9 @@ export const EditTransaction: React.FC<{
                 remove={removeLine}
               />
             ))}
-            {errors.lines ? <div className="ledger-error">{errors.lines}</div> : null}
+            {errors.lines ? (
+              <div className="ledger-error">{errors.lines}</div>
+            ) : null}
             <div className="ledger-hint">
               Leave one amount empty to balance the transaction automatically.
             </div>

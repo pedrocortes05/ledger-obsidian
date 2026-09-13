@@ -18,7 +18,5 @@ yarn-cache
 
 data.json
 
-# Generated Files
-
-grammar/ledger.ts
-grammar/ledger.ts-e
+# Build cache
+node_modules/.cache

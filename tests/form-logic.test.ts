@@ -49,7 +49,8 @@ const ctx = (operation: FormContext['operation'], index = 0): FormContext => ({
   operation,
   settings,
   txCache,
-  initialState: operation === 'new' ? emptyTransaction : txCache.transactions[index],
+  initialState:
+    operation === 'new' ? emptyTransaction : txCache.transactions[index],
 });
 
 const newValues = (overrides: Partial<Values> = {}): Values => ({
@@ -71,7 +72,9 @@ describe('initialValues()', () => {
     expect(values.total).toEqual('34.73');
     expect(values.currency).toEqual('USD');
     expect(leadingComments.map((c) => c.comment)).toEqual(['city: boston']);
-    expect(values.lines.map((l) => [l.account, l.amount, l.currency, l.virtual])).toEqual([
+    expect(
+      values.lines.map((l) => [l.account, l.amount, l.currency, l.virtual]),
+    ).toEqual([
       ['Expenses:Food:Groceries', '34.73', 'USD', ''],
       ['Budget:Boston', '-34.73', 'USD', '('],
       ['Assets:Banking:Bank of America', '', 'USD', ''],
@@ -102,11 +105,9 @@ describe('initialValues()', () => {
 });
 
 test('commodityOptions() puts the default first', () => {
-  expect(commodityOptions(settingsWithDefaults({ currencySymbol: 'USD' }), txCache)).toEqual([
-    'USD',
-    '$',
-    'AAPL',
-  ]);
+  expect(
+    commodityOptions(settingsWithDefaults({ currencySymbol: 'USD' }), txCache),
+  ).toEqual(['USD', '$', 'AAPL']);
 });
 
 describe('autofillFromPayee()', () => {
@@ -114,7 +115,14 @@ describe('autofillFromPayee()', () => {
     const result = autofillFromPayee(newValues(), 'star market', ctx('new'));
     expect(result?.source.value.date).toEqual('2026/09/05');
     expect(result?.values.currency).toEqual('USD');
-    expect(result?.values.lines.map((l) => [l.account, l.amount, l.virtual, l.comment])).toEqual([
+    expect(
+      result?.values.lines.map((l) => [
+        l.account,
+        l.amount,
+        l.virtual,
+        l.comment,
+      ]),
+    ).toEqual([
       ['Expenses:Food:Groceries', '34.73', '', 'milk'],
       ['Budget:Boston', '-34.73', '(', ''],
       ['Assets:Banking:Bank of America', '', '', ''],
@@ -122,7 +130,9 @@ describe('autofillFromPayee()', () => {
   });
 
   test('unknown payee', () => {
-    expect(autofillFromPayee(newValues(), 'Nobody', ctx('new'))).toBeUndefined();
+    expect(
+      autofillFromPayee(newValues(), 'Nobody', ctx('new')),
+    ).toBeUndefined();
   });
 });
 
@@ -130,14 +140,18 @@ describe('accountSuggestions() and lineLabel()', () => {
   test('income deposits to assets and comes from income accounts', () => {
     const values = newValues({ txType: 'income' });
     expect(accountSuggestions(values, 0, txCache)[0]).toMatch(/^Assets:/);
-    expect(accountSuggestions(values, 1, txCache)[0]).toEqual('Income:Causartt');
+    expect(accountSuggestions(values, 1, txCache)[0]).toEqual(
+      'Income:Causartt',
+    );
     expect(lineLabel(values, 0)).toEqual('Deposit to');
     expect(lineLabel(values, 1)).toEqual('Income from');
   });
 
   test('every account is still suggested', () => {
     const values = newValues({ txType: 'expense' });
-    expect(accountSuggestions(values, 0, txCache).sort()).toEqual([...txCache.accounts].sort());
+    expect(accountSuggestions(values, 0, txCache).sort()).toEqual(
+      [...txCache.accounts].sort(),
+    );
   });
 
   test('budget lines suggest virtual accounts', () => {
@@ -161,7 +175,11 @@ describe('validateValues()', () => {
       newValues({
         payee: '',
         date: '2026-02-30',
-        lines: lines(['', '5', 'USD'], ['Assets:X', '5', '$'], ['Assets:Y', '']),
+        lines: lines(
+          ['', '5', 'USD'],
+          ['Assets:X', '5', '$'],
+          ['Assets:Y', ''],
+        ),
       }),
       ctx('new'),
     );
@@ -186,12 +204,17 @@ describe('validateValues()', () => {
       newValues({ payee: 'A', lines: lines(['e:a', '10'], ['a:c', '-9']) }),
       ctx('new'),
     );
-    expect(errors.lines).toEqual('Amounts add up to $1.00 but must add up to $0.00.');
+    expect(errors.lines).toEqual(
+      'Amounts add up to $1.00 but must add up to $0.00.',
+    );
   });
 
   test('only one empty line', () => {
     const errors = validateValues(
-      newValues({ payee: 'A', lines: lines(['e:a', '10'], ['e:b', ''], ['a:c', '']) }),
+      newValues({
+        payee: 'A',
+        lines: lines(['e:a', '10'], ['e:b', ''], ['a:c', '']),
+      }),
       ctx('new'),
     );
     expect(errors.lines).toMatch(/Only one line/);
@@ -202,11 +225,18 @@ describe('validateValues()', () => {
       payee: 'A',
       lines: [
         makeLine({ account: 'e:a', amount: '10', currency: '$' }),
-        makeLine({ account: 'Budget:X', amount: '', currency: '$', virtual: '(' }),
+        makeLine({
+          account: 'Budget:X',
+          amount: '',
+          currency: '$',
+          virtual: '(',
+        }),
         makeLine({ account: 'a:c', amount: '-10', currency: '$' }),
       ],
     });
-    expect(validateValues(values, ctx('new')).lines).toMatch(/Budget lines need an amount/);
+    expect(validateValues(values, ctx('new')).lines).toMatch(
+      /Budget lines need an amount/,
+    );
     values.lines[1].amount = '-10';
     expect(validateValues(values, ctx('new'))).toEqual({});
   });
@@ -216,7 +246,12 @@ test('balancingAmount()', () => {
   const values = newValues({
     lines: [
       makeLine({ account: 'e:a', amount: '34.73', currency: 'USD' }),
-      makeLine({ account: 'Budget', amount: '-34.73', currency: 'USD', virtual: '(' }),
+      makeLine({
+        account: 'Budget',
+        amount: '-34.73',
+        currency: 'USD',
+        virtual: '(',
+      }),
       makeLine({ account: 'a:c', amount: '', currency: 'USD' }),
     ],
   });
@@ -239,18 +274,27 @@ test('seedFirstLine() only overwrites a seeded or empty first line', () => {
 });
 
 test('splitVirtual()', () => {
-  expect(splitVirtual(' (Budget:Trip) ', '')).toEqual({ account: 'Budget:Trip', virtual: '(' });
-  expect(splitVirtual('[Savings]', '')).toEqual({ account: 'Savings', virtual: '[' });
-  expect(splitVirtual('Budget:Trip', '(')).toEqual({ account: 'Budget:Trip', virtual: '(' });
+  expect(splitVirtual(' (Budget:Trip) ', '')).toEqual({
+    account: 'Budget:Trip',
+    virtual: '(',
+  });
+  expect(splitVirtual('[Savings]', '')).toEqual({
+    account: 'Savings',
+    virtual: '[',
+  });
+  expect(splitVirtual('Budget:Trip', '(')).toEqual({
+    account: 'Budget:Trip',
+    virtual: '(',
+  });
 });
 
 describe('buildTransactionText()', () => {
   test('unchanged edit reproduces the original block', () => {
     [1, 3, 4].forEach((index) => {
       const { values, leadingComments } = initialValues(ctx('modify', index));
-      expect(buildTransactionText(values, ctx('modify', index), leadingComments)).toEqual(
-        txCache.transactions[index].block.block,
-      );
+      expect(
+        buildTransactionText(values, ctx('modify', index), leadingComments),
+      ).toEqual(txCache.transactions[index].block.block);
     });
   });
 
@@ -258,11 +302,15 @@ describe('buildTransactionText()', () => {
     const { values, leadingComments } = initialValues(ctx('modify', 1));
     values.lines[1] = { ...values.lines[1], account: 'Budget:Madrid' };
     expect(
-      buildTransactionText(values, ctx('modify', 1), leadingComments).split('\n')[0],
+      buildTransactionText(values, ctx('modify', 1), leadingComments).split(
+        '\n',
+      )[0],
     ).toEqual('2026/09/05 (Budget:Madrid) Star Market');
     values.lines.splice(1, 1);
     expect(
-      buildTransactionText(values, ctx('modify', 1), leadingComments).split('\n')[0],
+      buildTransactionText(values, ctx('modify', 1), leadingComments).split(
+        '\n',
+      )[0],
     ).toEqual('2026/09/05 Star Market');
   });
 
@@ -283,12 +331,21 @@ describe('buildTransactionText()', () => {
       payee: 'Uber',
       date: '2026-09-13',
       lines: [
-        makeLine({ account: 'Expenses:Transport', amount: '149.9', currency: '$' }),
+        makeLine({
+          account: 'Expenses:Transport',
+          amount: '149.9',
+          currency: '$',
+        }),
         makeLine({ account: '(Budget:Trip)', amount: '-149.9', currency: '$' }),
-        makeLine({ account: 'Assets:Banking:Checking', amount: '', currency: '$' }),
+        makeLine({
+          account: 'Assets:Banking:Checking',
+          amount: '',
+          currency: '$',
+        }),
       ],
     });
-    expect(buildTransactionText(values, ctx('new'), [])).toEqual(`2026/09/13 (Budget:Trip) Uber
+    expect(buildTransactionText(values, ctx('new'), []))
+      .toEqual(`2026/09/13 (Budget:Trip) Uber
     Expenses:Transport    $149.90
     (Budget:Trip)    -$149.90
     Assets:Banking:Checking`);
@@ -301,7 +358,11 @@ describe('buildTransactionText()', () => {
       date: '2026-09-13',
       lines: [
         makeLine({ account: 'Assets:Savings', amount: '10', currency: 'USD' }),
-        makeLine({ account: 'Assets:Banking:Checking', amount: '', currency: 'USD' }),
+        makeLine({
+          account: 'Assets:Banking:Checking',
+          amount: '',
+          currency: 'USD',
+        }),
       ],
     });
     expect(buildTransactionText(values, ctx('new'), []).split('\n')[0]).toEqual(
@@ -314,10 +375,20 @@ describe('buildTransactionText()', () => {
       payee: 'SOL',
       date: '2026-09-13',
       lines: [
-        makeLine({ account: 'Assets:Crypto', amount: '0.00719462', currency: 'SOL' }),
-        makeLine({ account: 'Assets:Banking:Checking', amount: '-100', currency: '$' }),
+        makeLine({
+          account: 'Assets:Crypto',
+          amount: '0.00719462',
+          currency: 'SOL',
+        }),
+        makeLine({
+          account: 'Assets:Banking:Checking',
+          amount: '-100',
+          currency: '$',
+        }),
       ],
     });
-    expect(buildTransactionText(values, ctx('new'), [])).toContain('0.00719462 SOL');
+    expect(buildTransactionText(values, ctx('new'), [])).toContain(
+      '0.00719462 SOL',
+    );
   });
 });

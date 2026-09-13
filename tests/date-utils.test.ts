@@ -13,9 +13,9 @@ describe('makeBuckets()', () => {
   });
 
   test('single day range', () => {
-    expect(makeBuckets('week', moment('2021-12-01'), moment('2021-12-01'))).toEqual(
-      [{ startISO: '2021-12-01', endISO: '2021-12-01' }],
-    );
+    expect(
+      makeBuckets('week', moment('2021-12-01'), moment('2021-12-01')),
+    ).toEqual([{ startISO: '2021-12-01', endISO: '2021-12-01' }]);
   });
 
   test('days', () => {
@@ -27,9 +27,9 @@ describe('makeBuckets()', () => {
   });
 
   test('end before start', () => {
-    expect(makeBuckets('day', moment('2022-01-02'), moment('2022-01-01'))).toEqual(
-      [],
-    );
+    expect(
+      makeBuckets('day', moment('2022-01-02'), moment('2022-01-01')),
+    ).toEqual([]);
   });
 
   test('does not mutate the inputs', () => {
@@ -43,21 +43,37 @@ describe('makeBuckets()', () => {
 
 describe('presetRange()', () => {
   test('all time spans from the first to the last transaction', () => {
-    const range = presetRange('all-time', moment('2020-05-05'), moment('2999-01-01'));
+    const range = presetRange(
+      'all-time',
+      moment('2020-05-05'),
+      moment('2999-01-01'),
+    );
     expect(range.start.format('YYYY-MM-DD')).toEqual('2020-05-05');
     expect(range.end.format('YYYY-MM-DD')).toEqual('2999-01-01');
   });
 
   test('year to date ends today when there are no future transactions', () => {
-    const range = presetRange('ytd', moment('2020-01-01'), moment('2020-01-02'));
+    const range = presetRange(
+      'ytd',
+      moment('2020-01-01'),
+      moment('2020-01-02'),
+    );
     expect(range.start.format('MM-DD')).toEqual('01-01');
     expect(range.end.isSame(moment(), 'day')).toBe(true);
   });
 });
 
 test('suggestInterval()', () => {
-  expect(suggestInterval(moment('2024-01-01'), moment('2024-01-20'))).toEqual('day');
-  expect(suggestInterval(moment('2024-01-01'), moment('2024-05-01'))).toEqual('week');
-  expect(suggestInterval(moment('2021-01-01'), moment('2024-01-01'))).toEqual('month');
-  expect(suggestInterval(moment('2010-01-01'), moment('2024-01-01'))).toEqual('year');
+  expect(suggestInterval(moment('2024-01-01'), moment('2024-01-20'))).toEqual(
+    'day',
+  );
+  expect(suggestInterval(moment('2024-01-01'), moment('2024-05-01'))).toEqual(
+    'week',
+  );
+  expect(suggestInterval(moment('2021-01-01'), moment('2024-01-01'))).toEqual(
+    'month',
+  );
+  expect(suggestInterval(moment('2010-01-01'), moment('2024-01-01'))).toEqual(
+    'year',
+  );
 });

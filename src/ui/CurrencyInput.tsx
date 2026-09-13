@@ -26,7 +26,10 @@ const OTHER = '__other__';
  * without dropping any typed digits. Invalid input is returned unchanged so
  * validation can report it.
  */
-export const normalizeAmountInput = (text: string, minDecimals: number): string => {
+export const normalizeAmountInput = (
+  text: string,
+  minDecimals: number,
+): string => {
   const trimmed = text.trim().replace(/,/g, '');
   if (!/^-?\d*\.?\d*$/.test(trimmed) || !/\d/.test(trimmed)) {
     return text.trim();
@@ -66,7 +69,10 @@ export const CurrencyInput: React.FC<{
         onBlur={() => {
           if (props.amount !== '') {
             props.onAmountChange(
-              normalizeAmountInput(props.amount, props.minDecimals(props.currency)),
+              normalizeAmountInput(
+                props.amount,
+                props.minDecimals(props.currency),
+              ),
             );
           }
         }}

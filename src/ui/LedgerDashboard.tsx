@@ -1,6 +1,7 @@
 import { isAccountOrChild } from '../account-utils';
 import { BalanceHistory } from '../balance-utils';
 import {
+  Bucket,
   DatePreset,
   fromISO,
   Interval,
@@ -10,7 +11,7 @@ import {
   toISO,
 } from '../date-utils';
 import { LedgerModifier } from '../file-interface';
-import type { TransactionCache } from '../parser';
+import type { EnhancedTransaction, TransactionCache } from '../parser';
 import { ISettings } from '../settings';
 import {
   filterByAccount,
@@ -98,11 +99,39 @@ const Layout = styled.div`
 
 type Tab = 'overview' | 'budgets' | 'unreviewed' | 'accounts';
 
+interface DashboardState {
+  preset: DatePreset;
+  setPreset: (preset: DatePreset) => void;
+  startDate: Moment;
+  endDate: Moment;
+  setRange: (start: Moment, end: Moment) => void;
+  interval: Interval;
+  setInterval: (interval: Interval) => void;
+  selectedAccounts: string[];
+  setSelectedAccounts: (accounts: string[]) => void;
+  tab: Tab;
+  setTab: (tab: Tab) => void;
+  commodities: string[];
+  commodity: string;
+  setCommodity: (commodity: string) => void;
+  history: BalanceHistory;
+  startISO: string;
+  endISO: string;
+  buckets: Bucket[];
+  inRange: EnhancedTransaction[];
+  unreviewed: EnhancedTransaction[];
+  selectedTransactions: EnhancedTransaction[];
+  isFlowAccount: boolean;
+}
+
 /**
  * useDashboardState holds the date range, selection and commodity shared by
  * the desktop and mobile dashboards.
  */
-const useDashboardState = (props: { settings: ISettings; txCache: TransactionCache }) => {
+const useDashboardState = (props: {
+  settings: ISettings;
+  txCache: TransactionCache;
+}): DashboardState => {
   const { txCache, settings } = props;
   const lastDate = React.useMemo(
     () =>
@@ -114,7 +143,11 @@ const useDashboardState = (props: { settings: ISettings; txCache: TransactionCac
   );
 
   const [preset, setPresetState] = React.useState<DatePreset>('last-3-months');
-  const initialRange = presetRange('last-3-months', txCache.firstDate, fromISO(lastDate));
+  const initialRange = presetRange(
+    'last-3-months',
+    txCache.firstDate,
+    fromISO(lastDate),
+  );
   const [startDate, setStartDate] = React.useState<Moment>(initialRange.start);
   const [endDate, setEndDate] = React.useState<Moment>(initialRange.end);
   const [interval, setInterval] = React.useState<Interval>(
@@ -129,7 +162,7 @@ const useDashboardState = (props: { settings: ISettings; txCache: TransactionCac
   );
   const preferredCommodity = commodities.includes(settings.currencySymbol)
     ? settings.currencySymbol
-    : commodities[0] ?? settings.currencySymbol;
+    : (commodities[0] ?? settings.currencySymbol);
   const [commodity, setCommodity] = React.useState(preferredCommodity);
   React.useEffect(() => {
     if (!commodities.includes(commodity)) {
@@ -163,7 +196,10 @@ const useDashboardState = (props: { settings: ISettings; txCache: TransactionCac
     setEndDate(end);
   };
 
-  const history = React.useMemo(() => new BalanceHistory(txCache.transactions), [txCache]);
+  const history = React.useMemo(
+    () => new BalanceHistory(txCache.transactions),
+    [txCache],
+  );
   const startISO = toISO(startDate);
   const endISO = toISO(endDate);
   const buckets = React.useMemo(
@@ -186,7 +222,10 @@ const useDashboardState = (props: { settings: ISettings; txCache: TransactionCac
     () =>
       selectedAccounts.length === 0
         ? []
-        : filterTransactions(inRange, ...selectedAccounts.map((a) => filterByAccount(a))),
+        : filterTransactions(
+            inRange,
+            ...selectedAccounts.map((a) => filterByAccount(a)),
+          ),
     [inRange, selectedAccounts],
   );
   const isFlowAccount = selectedAccounts.some(
@@ -221,8 +260,6 @@ const useDashboardState = (props: { settings: ISettings; txCache: TransactionCac
   };
 };
 
-type DashboardState = ReturnType<typeof useDashboardState>;
-
 interface DashboardProps {
   tutorialIndex: number;
   setTutorialIndex: (index: number) => void;
@@ -231,7 +268,9 @@ interface DashboardProps {
   updater: LedgerModifier;
 }
 
-export const LedgerDashboard: React.FC<DashboardProps> = (props): JSX.Element => {
+export const LedgerDashboard: React.FC<DashboardProps> = (
+  props,
+): JSX.Element => {
   const [tutorialIndex, setTutorialIndex] = React.useState(props.tutorialIndex);
   const state = useDashboardState(props);
   const setTutorialIndexWrapper = (index: number): void => {
@@ -392,7 +431,10 @@ const DesktopDashboard: React.FC<DashboardProps & { state: DashboardState }> = (
           setInterval={state.setInterval}
         />
         {props.tutorialIndex !== -1 ? (
-          <Tutorial tutorialIndex={props.tutorialIndex} setTutorialIndex={props.setTutorialIndex} />
+          <Tutorial
+            tutorialIndex={props.tutorialIndex}
+            setTutorialIndex={props.setTutorialIndex}
+          />
         ) : null}
       </div>
 
@@ -449,7 +491,10 @@ const MobileDashboard: React.FC<DashboardProps & { state: DashboardState }> = (
           interval={state.interval}
           setInterval={state.setInterval}
         />
-        <button className="mod-cta" onClick={() => props.updater.openExpenseModal('new')}>
+        <button
+          className="mod-cta"
+          onClick={() => props.updater.openExpenseModal('new')}
+        >
           Add transaction
         </button>
       </div>
@@ -482,7 +527,8 @@ const Tutorial: React.FC<{
 }> = (props): JSX.Element => {
   const steps: Step[] = [
     {
-      intro: 'Welcome to the Obsidian Ledger plugin. Let me show you around a bit!',
+      intro:
+        'Welcome to the Obsidian Ledger plugin. Let me show you around a bit!',
       tooltipClass: 'ledger-tutorial-tooltip',
     },
     {

@@ -100,7 +100,8 @@ export const BudgetTable: React.FC<{
               </td>
               <td
                 className={
-                  'ledger-number' + (row.remaining < 0 ? ' ledger-negative' : '')
+                  'ledger-number' +
+                  (row.remaining < 0 ? ' ledger-negative' : '')
                 }
               >
                 {formatSigned(props.txCache, row.commodity, row.remaining)}

@@ -18,11 +18,17 @@ export interface TransactionPrefill {
   comment?: string;
 }
 
-const clean = (value: string | undefined, maxLength = 200): string | undefined => {
+const clean = (
+  value: string | undefined,
+  maxLength = 200,
+): string | undefined => {
   if (value === undefined) {
     return undefined;
   }
-  const trimmed = value.replace(/[\r\n\t]+/g, ' ').trim().slice(0, maxLength);
+  const trimmed = value
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
   return trimmed === '' ? undefined : trimmed;
 };
 

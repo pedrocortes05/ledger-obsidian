@@ -60,7 +60,9 @@ const readCommodity = (s: string): [string, string] | undefined => {
 
 const readNumber = (
   s: string,
-): { value: number; precision: number; thousands: boolean; rest: string } | undefined => {
+):
+  | { value: number; precision: number; thousands: boolean; rest: string }
+  | undefined => {
   const match = numberPattern.exec(s);
   if (!match) {
     return undefined;
@@ -207,7 +209,8 @@ export const formatAmount = (
   const decimals =
     minDecimals !== undefined ? minDecimals : Math.min(style.precision, 2);
   const number = formatQuantity(amount.quantity, decimals, style.thousands);
-  const negative = amount.quantity < 0 && parseFloat(number.replace(/,/g, '')) !== 0;
+  const negative =
+    amount.quantity < 0 && parseFloat(number.replace(/,/g, '')) !== 0;
   const symbol = needsQuotes(amount.commodity)
     ? `"${amount.commodity}"`
     : amount.commodity;

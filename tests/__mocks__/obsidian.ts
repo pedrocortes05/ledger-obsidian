@@ -1,4 +1,5 @@
 /* Minimal stand-in for the obsidian module in unit tests. */
+/* eslint-disable @typescript-eslint/no-extraneous-class, @typescript-eslint/explicit-function-return-type */
 export const Platform = { isMobile: false };
 
 export class Notice {

@@ -79,7 +79,9 @@ cache.parsingErrors.forEach((error) => {
   console.log(`  line ${block.firstLine + 1}: ${error.message}`);
 });
 if (mismatches.length === 0) {
-  console.log(`All ${expected.size} account/commodity balances match ledger-cli.`);
+  console.log(
+    `All ${expected.size} account/commodity balances match ledger-cli.`,
+  );
 } else {
   console.log(`${mismatches.length} balances differ from ledger-cli:`);
   mismatches.sort().forEach((m) => console.log('  ' + m));

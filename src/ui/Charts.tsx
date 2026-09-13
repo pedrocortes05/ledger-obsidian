@@ -68,7 +68,14 @@ export const CommoditySelector: React.FC<{
     </select>
   ) : null;
 
-const labelOptions = (buckets: Bucket[], interval: Interval) => {
+interface LabelOptions {
+  labels: string[];
+  axisX: {
+    labelInterpolationFnc: (value: string, index: number) => string | null;
+  };
+}
+
+const labelOptions = (buckets: Bucket[], interval: Interval): LabelOptions => {
   const labels = buckets.map((bucket) => formatBucketLabel(bucket, interval));
   const every = Math.max(1, Math.ceil(labels.length / 12));
   return {
@@ -94,7 +101,14 @@ export const NetWorthChart: React.FC<{
 }> = (props): JSX.Element => {
   const { labels, axisX } = labelOptions(props.buckets, props.interval);
   const series = React.useMemo(
-    () => [makeNetWorthSeries(props.history, props.settings, props.buckets, props.commodity)],
+    () => [
+      makeNetWorthSeries(
+        props.history,
+        props.settings,
+        props.buckets,
+        props.commodity,
+      ),
+    ],
     [props.history, props.settings, props.buckets, props.commodity],
   );
   const totals = netWorthAt(props.history, props.settings, props.endISO);
@@ -155,7 +169,13 @@ export const AccountChart: React.FC<{
   const series = React.useMemo(
     () =>
       accounts.map((account) =>
-        makeAccountSeries(props.history, account, props.buckets, props.commodity, mode),
+        makeAccountSeries(
+          props.history,
+          account,
+          props.buckets,
+          props.commodity,
+          mode,
+        ),
       ),
     [props.history, accounts.join('|'), props.buckets, props.commodity, mode],
   );
@@ -201,18 +221,31 @@ export const AccountChart: React.FC<{
       </div>
       {accounts.map((account) => {
         const balance = props.history.balanceAt(account, props.endISO);
-        const change = props.history.changeBetween(account, props.startISO, props.endISO);
+        const change = props.history.changeBetween(
+          account,
+          props.startISO,
+          props.endISO,
+        );
         return (
           <p key={account} className="ledger-subtitle">
-            {account}: balance {formatAmountMap(balance, props.txCache.commodityMap)} ·
-            change {formatAmountMap(change, props.txCache.commodityMap)}
+            {account}: balance{' '}
+            {formatAmountMap(balance, props.txCache.commodityMap)} · change{' '}
+            {formatAmountMap(change, props.txCache.commodityMap)}
           </p>
         );
       })}
       {mode === 'balance' ? (
-        <ChartistGraph data={{ labels, series }} options={lineOptions} type="Line" />
+        <ChartistGraph
+          data={{ labels, series }}
+          options={lineOptions}
+          type="Line"
+        />
       ) : (
-        <ChartistGraph data={{ labels, series }} options={barOptions} type="Bar" />
+        <ChartistGraph
+          data={{ labels, series }}
+          options={barOptions}
+          type="Bar"
+        />
       )}
     </ChartStyles>
   );
@@ -222,4 +255,5 @@ export const formatSigned = (
   txCache: TransactionCache,
   commodity: string,
   quantity: number,
-): string => formatAmount({ commodity, quantity }, txCache.commodityMap.get(commodity));
+): string =>
+  formatAmount({ commodity, quantity }, txCache.commodityMap.get(commodity));

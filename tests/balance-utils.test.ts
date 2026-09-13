@@ -72,7 +72,11 @@ describe('BalanceHistory', () => {
   });
 
   test('series per bucket end', () => {
-    const buckets = makeBuckets('month', moment('2024-01-10'), moment('2024-02-05'));
+    const buckets = makeBuckets(
+      'month',
+      moment('2024-01-10'),
+      moment('2024-02-05'),
+    );
     expect(makeNetWorthSeries(history, settings, buckets, '$')).toEqual([
       750, 750,
     ]);

@@ -1,4 +1,10 @@
-import { DatePreset, datePresets, fromISO, Interval, toISO } from '../date-utils';
+import {
+  DatePreset,
+  datePresets,
+  fromISO,
+  Interval,
+  toISO,
+} from '../date-utils';
 import { Moment } from 'moment';
 import React from 'react';
 import styled from 'styled-components';

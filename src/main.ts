@@ -40,8 +40,6 @@ export default class LedgerPlugin extends Plugin {
   );
 
   public async onload(): Promise<void> {
-    console.log('ledger: Loading plugin v' + this.manifest.version);
-
     await this.loadSettings();
     this.txCache = parse('', this.settings);
     this.addSettingTab(new SettingsTab(this));
@@ -79,7 +77,10 @@ export default class LedgerPlugin extends Plugin {
     );
     this.registerEvent(
       this.app.vault.on('rename', (file: TAbstractFile, oldPath: string) => {
-        if (oldPath === this.settings.ledgerFile && file.path.endsWith('.ledger')) {
+        if (
+          oldPath === this.settings.ledgerFile &&
+          file.path.endsWith('.ledger')
+        ) {
           this.settings.ledgerFile = file.path;
           this.saveSettings();
         }
@@ -264,7 +265,9 @@ ${window.moment().format('YYYY/MM/DD')} Starting Balances
       );
     } catch (error) {
       console.error('ledger: failed to parse the ledger file', error);
-      new Notice('Ledger: failed to read the ledger file. See the console for details.');
+      new Notice(
+        'Ledger: failed to read the ledger file. See the console for details.',
+      );
       return;
     }
 

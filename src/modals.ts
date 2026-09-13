@@ -36,7 +36,8 @@ export class AddExpenseModal extends Modal {
     this.modalEl.addClass('ledger-modal');
     ReactDOM.render(
       React.createElement(EditTransaction, {
-        displayFileWarning: !this.plugin.settings.ledgerFile.endsWith('.ledger'),
+        displayFileWarning:
+          !this.plugin.settings.ledgerFile.endsWith('.ledger'),
         settings: this.plugin.settings,
         initialState: this.initialState,
         operation: this.operation,
@@ -59,8 +60,8 @@ export class AddExpenseModal extends Modal {
  * ConfirmModal asks a yes/no question and resolves with the answer.
  */
 export class ConfirmModal extends Modal {
-  private resolve: (confirmed: boolean) => void = () => undefined;
   private confirmed = false;
+  private resolveAnswer: ((confirmed: boolean) => void) | null = null;
 
   constructor(
     app: App,
@@ -73,7 +74,7 @@ export class ConfirmModal extends Modal {
 
   public openAndWait(): Promise<boolean> {
     return new Promise((resolve) => {
-      this.resolve = resolve;
+      this.resolveAnswer = resolve;
       this.open();
     });
   }
@@ -98,6 +99,6 @@ export class ConfirmModal extends Modal {
 
   public onClose(): void {
     this.contentEl.empty();
-    this.resolve(this.confirmed);
+    this.resolveAnswer?.(this.confirmed);
   }
 }

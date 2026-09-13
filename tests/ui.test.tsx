@@ -64,11 +64,16 @@ const click = (element: Element | null | undefined): void => {
 };
 
 const buttonWithText = (text: string): HTMLButtonElement | undefined =>
-  [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(text));
+  [...container.querySelectorAll('button')].find((b) =>
+    b.textContent?.includes(text),
+  );
 
 const type = (input: HTMLInputElement, value: string): void => {
   act(() => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      'value',
+    )?.set;
     setter?.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
@@ -110,14 +115,18 @@ describe.each([false, true])('LedgerDashboard (mobile: %s)', (mobile) => {
     } else {
       click(buttonWithText('Overview'));
     }
-    const account = [...container.querySelectorAll('.ledger-account-name')].find(
-      (el) => el.textContent === 'Checking',
-    );
+    const account = [
+      ...container.querySelectorAll('.ledger-account-name'),
+    ].find((el) => el.textContent === 'Checking');
     click(account);
-    expect(container.textContent).toContain('Assets:Checking: balance $1000.00, 20.00 USD');
+    expect(container.textContent).toContain(
+      'Assets:Checking: balance $1000.00, 20.00 USD',
+    );
 
     // Switching to an empty range must not crash (hooks order).
-    const preset = container.querySelector('select[aria-label="Date range"]') as HTMLSelectElement;
+    const preset = container.querySelector(
+      'select[aria-label="Date range"]',
+    ) as HTMLSelectElement;
     act(() => {
       preset.value = 'this-month';
       preset.dispatchEvent(new Event('change', { bubbles: true }));
@@ -148,7 +157,9 @@ test('EditTransaction adds a transaction end to end', async () => {
     );
   });
 
-  const payee = container.querySelector('input[placeholder^="Payee"]') as HTMLInputElement;
+  const payee = container.querySelector(
+    'input[placeholder^="Payee"]',
+  ) as HTMLInputElement;
   type(payee, 'Groceries');
   act(() => {
     payee.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
@@ -159,7 +170,9 @@ test('EditTransaction adds a transaction end to end', async () => {
   expect(container.textContent).toContain('Budget account');
 
   await act(async () => {
-    buttonWithText('Submit')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    buttonWithText('Submit')?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true }),
+    );
   });
   expect(updater.addTransaction).toHaveBeenCalledWith(
     `${today.format('YYYY/MM/DD')} (Budget:Trip) Groceries

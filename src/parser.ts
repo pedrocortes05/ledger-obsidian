@@ -1,16 +1,16 @@
+import { dealiasAccount, isAccountOrChild } from './account-utils';
 import {
   addToAmountMap,
   Amount,
   AmountMap,
   CommodityInfo,
   defaultCommodityInfo,
-  ParsedAmount,
   parseAmount,
+  ParsedAmount,
   tolerance,
 } from './amounts';
 import { Error, TxError } from './error';
 import { ISettings } from './settings';
-import { dealiasAccount, isAccountOrChild } from './account-utils';
 import { Moment } from 'moment';
 
 /**
@@ -504,7 +504,11 @@ const parseTransaction = (
 
   const match = headerPattern.exec(header.trimEnd());
   const dateISO = match ? normalizeDate(match[1]) : undefined;
-  if (!match || !dateISO || !window.moment(dateISO, 'YYYY-MM-DD', true).isValid()) {
+  if (
+    !match ||
+    !dateISO ||
+    !window.moment(dateISO, 'YYYY-MM-DD', true).isValid()
+  ) {
     result.errors.push({ message: 'Unable to read transaction date', block });
     return i;
   }
@@ -551,9 +555,7 @@ const parseTransaction = (
   return i;
 };
 
-export const getPostings = (
-  tx: EnhancedTransaction,
-): EnhancedExpenseLine[] =>
+export const getPostings = (tx: EnhancedTransaction): EnhancedExpenseLine[] =>
   tx.value.expenselines.filter(
     (line): line is EnhancedExpenseLine => 'account' in line,
   );
@@ -628,7 +630,7 @@ const computeAmounts = (
           pending.set(posting.dealiasedAccount, map);
         }
         posting.amounts.forEach((a) =>
-          addToAmountMap(map as AmountMap, a.commodity, a.quantity),
+          addToAmountMap(map, a.commodity, a.quantity),
         );
       }
     });
@@ -644,7 +646,9 @@ const computeAmounts = (
       members
         .filter((p) => !missing.includes(p))
         .forEach((p) =>
-          costOf(p).forEach((a) => addToAmountMap(sums, a.commodity, a.quantity)),
+          costOf(p).forEach((a) =>
+            addToAmountMap(sums, a.commodity, a.quantity),
+          ),
         );
       const unbalanced = [...sums.entries()].filter(
         ([commodity, quantity]) => Math.abs(quantity) > tol(commodity),
@@ -743,14 +747,22 @@ const byRecency = (a: UsageStats, b: UsageStats): number =>
   a.lastDate === b.lastDate
     ? b.lastIndex - a.lastIndex || b.count - a.count
     : a.lastDate < b.lastDate
-    ? 1
-    : -1;
+      ? 1
+      : -1;
 
 const collectCommodities = (
   transactions: EnhancedTransaction[],
   declared: string[],
 ): Map<string, CommodityInfo> => {
-  const infos = new Map<string, CommodityInfo & { negAfter: number; negBefore: number; prefixCount: number; spacedCount: number }>();
+  const infos = new Map<
+    string,
+    CommodityInfo & {
+      negAfter: number;
+      negBefore: number;
+      prefixCount: number;
+      spacedCount: number;
+    }
+  >();
   const record = (amount: ParsedAmount, dateISO: string): void => {
     let info = infos.get(amount.commodity);
     if (!info) {
@@ -898,7 +910,8 @@ export const parse = (
     );
 
   const firstDateISO = transactions.reduce(
-    (min, tx) => (min === '' || tx.value.dateISO < min ? tx.value.dateISO : min),
+    (min, tx) =>
+      min === '' || tx.value.dateISO < min ? tx.value.dateISO : min,
     '',
   );
 

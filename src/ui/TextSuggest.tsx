@@ -42,7 +42,10 @@ export const TextSuggest: React.FC<{
   className?: string;
 }> = (props): JSX.Element => {
   const limit = props.limit ?? 15;
-  const fuse = React.useMemo(() => makeFuse(props.suggestions), [props.suggestions]);
+  const fuse = React.useMemo(
+    () => makeFuse(props.suggestions),
+    [props.suggestions],
+  );
   const [visible, setVisible] = React.useState(false);
   const [selectedIndex, setSelectedIndex] = React.useState(-1);
 
@@ -67,9 +70,10 @@ export const TextSuggest: React.FC<{
     setSelectedIndex(-1);
   };
 
-  const showList = visible && results.length > 0 && !(
-    results.length === 1 && results[0] === props.value
-  );
+  const showList =
+    visible &&
+    results.length > 0 &&
+    !(results.length === 1 && results[0] === props.value);
 
   return (
     <>
@@ -111,7 +115,11 @@ export const TextSuggest: React.FC<{
               return;
             case 'Enter':
               e.preventDefault();
-              if (showList && selectedIndex >= 0 && selectedIndex < results.length) {
+              if (
+                showList &&
+                selectedIndex >= 0 &&
+                selectedIndex < results.length
+              ) {
                 choose(results[selectedIndex]);
               } else {
                 // Keep what was typed, even if nothing matches.
@@ -139,7 +147,9 @@ export const TextSuggest: React.FC<{
           {results.map((s, i) => (
             <div
               key={s}
-              className={'suggestion-item' + (i === selectedIndex ? ' is-selected' : '')}
+              className={
+                'suggestion-item' + (i === selectedIndex ? ' is-selected' : '')
+              }
               onMouseDown={(e) => {
                 // Keep focus in the input so blur does not fire first.
                 e.preventDefault();

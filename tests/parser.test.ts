@@ -30,7 +30,10 @@ describe('parsePostingLine()', () => {
   });
 
   test('tab separator, status and comment', () => {
-    const { posting } = parsePostingLine('\t* Expenses:Food\t-$5.25 ; lunch', 0);
+    const { posting } = parsePostingLine(
+      '\t* Expenses:Food\t-$5.25 ; lunch',
+      0,
+    );
     expect(posting).toMatchObject({
       reconcile: '*',
       account: 'Expenses:Food',
@@ -78,8 +81,9 @@ describe('parsePostingLine()', () => {
   });
 
   test('virtual accounts', () => {
-    expect(parsePostingLine('  (Budget:Boston)  -34.73 USD', 0).posting)
-      .toMatchObject({ account: 'Budget:Boston', virtual: '(' });
+    expect(
+      parsePostingLine('  (Budget:Boston)  -34.73 USD', 0).posting,
+    ).toMatchObject({ account: 'Budget:Boston', virtual: '(' });
     expect(parsePostingLine('  [Savings:Goal]  $5', 0).posting).toMatchObject({
       account: 'Savings:Goal',
       virtual: '[',

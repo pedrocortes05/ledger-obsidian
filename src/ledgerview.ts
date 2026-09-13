@@ -2,7 +2,13 @@ import { getTransactionCache, LedgerModifier } from './file-interface';
 import type LedgerPlugin from './main';
 import { TransactionCache } from './parser';
 import { LedgerDashboard } from './ui/LedgerDashboard';
-import { debounce, FileView, TAbstractFile, TFile, WorkspaceLeaf } from 'obsidian';
+import {
+  debounce,
+  FileView,
+  TAbstractFile,
+  TFile,
+  WorkspaceLeaf,
+} from 'obsidian';
 import React from 'react';
 import ReactDOM from 'react-dom';
 

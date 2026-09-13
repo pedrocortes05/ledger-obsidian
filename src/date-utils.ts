@@ -58,7 +58,10 @@ export const makeBuckets = (
   return buckets;
 };
 
-export const formatBucketLabel = (bucket: Bucket, interval: Interval): string => {
+export const formatBucketLabel = (
+  bucket: Bucket,
+  interval: Interval,
+): string => {
   const start = fromISO(bucket.startISO);
   switch (interval) {
     case 'day':

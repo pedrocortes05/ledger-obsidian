@@ -98,9 +98,7 @@ export const formatTransaction = (
     .join(' ');
   const headerComment = value.comment ? `  ; ${value.comment}` : '';
   const lines = value.expenselines.map((line) =>
-    'account' in line
-      ? formatPosting(line, commodities)
-      : formatComment(line),
+    'account' in line ? formatPosting(line, commodities) : formatComment(line),
   );
   return [header + headerComment, ...lines].join('\n');
 };
@@ -135,10 +133,14 @@ export const inferTxType = (
   const accounts = getPostings(tx)
     .filter((posting) => posting.virtual === '')
     .map((posting) => posting.dealiasedAccount);
-  if (accounts.some((a) => isAccountOrChild(a, settings.expenseAccountsPrefix))) {
+  if (
+    accounts.some((a) => isAccountOrChild(a, settings.expenseAccountsPrefix))
+  ) {
     return 'expense';
   }
-  if (accounts.some((a) => isAccountOrChild(a, settings.incomeAccountsPrefix))) {
+  if (
+    accounts.some((a) => isAccountOrChild(a, settings.incomeAccountsPrefix))
+  ) {
     return 'income';
   }
   return 'transfer';
@@ -205,8 +207,8 @@ export const sortByDateDesc = (
       a.tx.value.dateISO === b.tx.value.dateISO
         ? b.index - a.index
         : a.tx.value.dateISO < b.tx.value.dateISO
-        ? 1
-        : -1,
+          ? 1
+          : -1,
     )
     .map(({ tx }) => tx);
 

@@ -110,10 +110,14 @@ export const makeRow = (
     tx,
     total: formatAmountMap(getTransactionTotal(tx), txCache.commodityMap),
     from: describeAccounts(
-      real.filter((p) => p.amounts.some((a) => a.quantity < 0)).map((p) => p.account),
+      real
+        .filter((p) => p.amounts.some((a) => a.quantity < 0))
+        .map((p) => p.account),
     ),
     to: describeAccounts(
-      real.filter((p) => p.amounts.some((a) => a.quantity >= 0)).map((p) => p.account),
+      real
+        .filter((p) => p.amounts.some((a) => a.quantity >= 0))
+        .map((p) => p.account),
     ),
     budget: virtual.length
       ? virtual.map((p) => wrapVirtual(p.account, p.virtual)).join(', ')
@@ -184,7 +188,9 @@ export const TransactionTable: React.FC<{
   );
 
   if (props.transactions.length === 0) {
-    return <p>{props.emptyMessage ?? 'No transactions for the selected dates.'}</p>;
+    return (
+      <p>{props.emptyMessage ?? 'No transactions for the selected dates.'}</p>
+    );
   }
 
   const more =
@@ -198,7 +204,10 @@ export const TransactionTable: React.FC<{
     return (
       <TableStyles>
         {rows.map((row) => (
-          <div className="ledger-card" key={`${row.tx.block.firstLine}-${row.tx.value.payee}`}>
+          <div
+            className="ledger-card"
+            key={`${row.tx.block.firstLine}-${row.tx.value.payee}`}
+          >
             <div className="ledger-card-header">
               <strong>{row.tx.value.payee}</strong>
               <span>{row.total}</span>
@@ -234,7 +243,9 @@ export const TransactionTable: React.FC<{
               <td>{row.tx.value.date}</td>
               <td>
                 {row.tx.value.payee}
-                {row.budget ? <div className="ledger-muted">{row.budget}</div> : null}
+                {row.budget ? (
+                  <div className="ledger-muted">{row.budget}</div>
+                ) : null}
               </td>
               <td className="ledger-amount-cell">{row.total}</td>
               <td>{row.from}</td>

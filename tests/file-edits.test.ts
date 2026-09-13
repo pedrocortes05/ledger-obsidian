@@ -56,8 +56,9 @@ describe('locateBlock()', () => {
 });
 
 test('replaceBlock()', () => {
-  expect(replaceBlock(file, blockB, '2024/01/05 B2\n    e:x    $2\n    a:y'))
-    .toEqual(file.replace('B\n    e:x    $1', 'B2\n    e:x    $2'));
+  expect(
+    replaceBlock(file, blockB, '2024/01/05 B2\n    e:x    $2\n    a:y'),
+  ).toEqual(file.replace('B\n    e:x    $1', 'B2\n    e:x    $2'));
 });
 
 describe('deleteBlock()', () => {
@@ -120,17 +121,28 @@ describe('insertTransaction()', () => {
 
   test('uses file order when the file is not sorted', () => {
     // C (01/03) is the last transaction on or before 01/04.
-    expect(insertTransaction(file, tx, '2024-01-04')).toEqual(`${file}\n${tx}\n`);
+    expect(insertTransaction(file, tx, '2024-01-04')).toEqual(
+      `${file}\n${tx}\n`,
+    );
   });
 
   test('at the end when it is the latest', () => {
-    expect(insertTransaction(file, tx.replace('01/04', '02/01'), '2024-02-01'))
-      .toEqual(`${file}\n${tx.replace('01/04', '02/01')}\n`);
+    expect(
+      insertTransaction(file, tx.replace('01/04', '02/01'), '2024-02-01'),
+    ).toEqual(`${file}\n${tx.replace('01/04', '02/01')}\n`);
   });
 
   test('before the first transaction when it is the earliest', () => {
-    const result = insertTransaction(file, tx.replace('2024', '2023'), '2023-01-04');
-    expect(result.startsWith(`alias e=Expenses\n\n2023/01/04 New\n    e:x    $1\n    a:y\n\n2024/01/01 A`)).toBe(true);
+    const result = insertTransaction(
+      file,
+      tx.replace('2024', '2023'),
+      '2023-01-04',
+    );
+    expect(
+      result.startsWith(
+        `alias e=Expenses\n\n2023/01/04 New\n    e:x    $1\n    a:y\n\n2024/01/01 A`,
+      ),
+    ).toBe(true);
   });
 
   test('in an empty file', () => {
@@ -142,8 +154,14 @@ describe('insertTransaction()', () => {
 
   test('without blank lines between transactions or a trailing newline', () => {
     expect(
-      insertTransaction('2024/01/01 A\n  e:x  $1\n  a:y\n2024/01/09 B\n  e:x  $1\n  a:y', tx, '2024-01-04'),
-    ).toEqual(`2024/01/01 A\n  e:x  $1\n  a:y\n\n${tx}\n\n2024/01/09 B\n  e:x  $1\n  a:y`);
+      insertTransaction(
+        '2024/01/01 A\n  e:x  $1\n  a:y\n2024/01/09 B\n  e:x  $1\n  a:y',
+        tx,
+        '2024-01-04',
+      ),
+    ).toEqual(
+      `2024/01/01 A\n  e:x  $1\n  a:y\n\n${tx}\n\n2024/01/09 B\n  e:x  $1\n  a:y`,
+    );
   });
 
   test('keeps CRLF line endings', () => {

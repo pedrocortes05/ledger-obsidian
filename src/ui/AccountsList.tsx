@@ -77,7 +77,10 @@ const Tree: React.FC<{
         >
           {props.data.account}
         </span>
-        <span className="ledger-account-balance" onClick={() => props.toggle(id)}>
+        <span
+          className="ledger-account-balance"
+          onClick={() => props.toggle(id)}
+        >
           {props.balanceText(id)}
         </span>
       </TreeRow>
@@ -97,7 +100,11 @@ const Tree: React.FC<{
   );
 };
 
-const accountGroup = (account: string, settings: ISettings, txCache: TransactionCache): string => {
+const accountGroup = (
+  account: string,
+  settings: ISettings,
+  txCache: TransactionCache,
+): string => {
   if (
     isAccountOrChild(account, settings.assetAccountsPrefix) ||
     isAccountOrChild(account, settings.liabilityAccountsPrefix)
@@ -156,7 +163,9 @@ export const AccountsList: React.FC<{
   }, [props.txCache]);
 
   const balanceText = (account: string): string => {
-    const quantity = props.history.balanceAt(account, props.endISO).get(props.commodity);
+    const quantity = props.history
+      .balanceAt(account, props.endISO)
+      .get(props.commodity);
     if (quantity === undefined || Math.abs(quantity) < 1e-8) {
       return '';
     }
@@ -177,7 +186,12 @@ export const AccountsList: React.FC<{
           selectedAccounts={props.selectedAccounts}
           toggle={(account) =>
             props.setSelectedAccounts(
-              nextSelection(props.selectedAccounts, account, props.settings, props.txCache),
+              nextSelection(
+                props.selectedAccounts,
+                account,
+                props.settings,
+                props.txCache,
+              ),
             )
           }
         />

@@ -98,7 +98,9 @@ export const commodityOptions = (
   settings: ISettings,
   txCache: TransactionCache,
 ): string[] => {
-  const symbols = txCache.commodities.map((c) => c.symbol).filter((s) => s !== '');
+  const symbols = txCache.commodities
+    .map((c) => c.symbol)
+    .filter((s) => s !== '');
   const preferred = defaultCommodity(settings, txCache);
   return [preferred, ...symbols.filter((s) => s !== preferred)];
 };
@@ -141,7 +143,12 @@ const linesFromTransaction = (
       makeLine({
         account: entry.account,
         amount: entry.hasWrittenAmount
-          ? formatQuantityInput(txCache, entry.currency, entry.amount, entry.precision)
+          ? formatQuantityInput(
+              txCache,
+              entry.currency,
+              entry.amount,
+              entry.precision,
+            )
           : '',
         currency: entry.currency,
         comment: entry.comment || '',
@@ -244,7 +251,11 @@ export const initialValues = (
   if (ctx.operation !== 'new') {
     const tx = ctx.initialState;
     const keepOriginal = ctx.operation === 'modify';
-    const { lines, leadingComments } = linesFromTransaction(tx, ctx.txCache, keepOriginal);
+    const { lines, leadingComments } = linesFromTransaction(
+      tx,
+      ctx.txCache,
+      keepOriginal,
+    );
     const totals = primaryTotal(tx, ctx.txCache);
     return {
       leadingComments,
@@ -277,7 +288,10 @@ export const initialValues = (
       lines[0] = { ...lines[0], account: prefill.account };
     }
     if (prefill.from) {
-      lines[lines.length - 1] = { ...lines[lines.length - 1], account: prefill.from };
+      lines[lines.length - 1] = {
+        ...lines[lines.length - 1],
+        account: prefill.from,
+      };
     }
     if (prefill.comment) {
       lines[0] = { ...lines[0], comment: prefill.comment };
@@ -300,7 +314,10 @@ export const initialValues = (
   return { values, leadingComments: [] };
 };
 
-const unionRanked = (primary: string[], txCache: TransactionCache): string[] => {
+const unionRanked = (
+  primary: string[],
+  txCache: TransactionCache,
+): string[] => {
   const set = new Set(primary);
   return [
     ...txCache.accountsByUsage.filter((a) => set.has(a)),
@@ -312,7 +329,9 @@ const isLast = (values: Values, index: number): boolean => {
   const realIndexes = values.lines
     .map((line, i) => (line.virtual === '' ? i : -1))
     .filter((i) => i >= 0);
-  return realIndexes.length > 1 && index === realIndexes[realIndexes.length - 1];
+  return (
+    realIndexes.length > 1 && index === realIndexes[realIndexes.length - 1]
+  );
 };
 
 /**
@@ -325,16 +344,25 @@ export const accountSuggestions = (
   txCache: TransactionCache,
 ): string[] => {
   const line = values.lines[index];
-  const assetsAndLiabilities = [...txCache.assetAccounts, ...txCache.liabilityAccounts];
+  const assetsAndLiabilities = [
+    ...txCache.assetAccounts,
+    ...txCache.liabilityAccounts,
+  ];
   if (line.virtual) {
     return unionRanked(txCache.virtualAccounts, txCache);
   }
   const last = isLast(values, index);
   switch (values.txType) {
     case 'expense':
-      return unionRanked(last ? assetsAndLiabilities : txCache.expenseAccounts, txCache);
+      return unionRanked(
+        last ? assetsAndLiabilities : txCache.expenseAccounts,
+        txCache,
+      );
     case 'income':
-      return unionRanked(last ? txCache.incomeAccounts : assetsAndLiabilities, txCache);
+      return unionRanked(
+        last ? txCache.incomeAccounts : assetsAndLiabilities,
+        txCache,
+      );
     case 'transfer':
       return unionRanked(assetsAndLiabilities, txCache);
   }
@@ -416,7 +444,11 @@ export const validateValues = (
   if (values.lines.some((line) => line.account.trim() === '')) {
     lineErrors.push('Every line must have an account.');
   }
-  if (values.lines.some((line) => line.amount !== '' && parseTyped(line.amount) === undefined)) {
+  if (
+    values.lines.some(
+      (line) => line.amount !== '' && parseTyped(line.amount) === undefined,
+    )
+  ) {
     lineErrors.push('Amounts must be numbers.');
   }
   if (values.lines.length < 2) {
@@ -433,11 +465,15 @@ export const validateValues = (
     (line) => line.amount.trim() === '' && !isAssignment(line),
   );
   if (emptyReal.length > 1) {
-    lineErrors.push('Only one line can be left empty; it balances the transaction.');
+    lineErrors.push(
+      'Only one line can be left empty; it balances the transaction.',
+    );
   }
   if (
     values.lines.some(
-      (line) => splitVirtual(line.account, line.virtual).virtual && line.amount.trim() === '',
+      (line) =>
+        splitVirtual(line.account, line.virtual).virtual &&
+        line.amount.trim() === '',
     )
   ) {
     lineErrors.push('Budget lines need an amount.');
@@ -449,7 +485,9 @@ export const validateValues = (
     lineErrors.length === 0
   ) {
     const sums: AmountMap = new Map();
-    const hasPrice = realLines.some((line) => line.original?.price || line.original?.lotCost);
+    const hasPrice = realLines.some(
+      (line) => line.original?.price || line.original?.lotCost,
+    );
     realLines.forEach((line) => {
       const quantity = parseTyped(line.amount);
       if (quantity !== undefined) {
@@ -548,7 +586,8 @@ const formatDate = (dateISO: string, ctx: FormContext): string => {
   const sample =
     ctx.operation === 'modify'
       ? ctx.initialState.value.date
-      : ctx.txCache.transactions[ctx.txCache.transactions.length - 1]?.value.date;
+      : ctx.txCache.transactions[ctx.txCache.transactions.length - 1]?.value
+          .date;
   const separator = sample && sample[4] === '-' ? '-' : '/';
   return dateISO.replace(/-/g, separator);
 };
@@ -575,7 +614,9 @@ export const buildTransactionText = (
     .map((line) => splitVirtual(line.account, line.virtual))
     .find((line) => line.virtual === '(');
   const originalVirtualNames = original
-    ? getPostings(original).filter((p) => p.virtual).map((p) => p.account)
+    ? getPostings(original)
+        .filter((p) => p.virtual)
+        .map((p) => p.account)
     : [];
   // New transactions get the budget account as their code, like
   // "2024/11/29 (Budget:Boston) Star Market". Edits keep the header as it was,
@@ -589,7 +630,9 @@ export const buildTransactionText = (
       : original.value.code;
   }
 
-  const expenselines: (EnhancedExpenseLine | Commentline)[] = [...leadingComments];
+  const expenselines: (EnhancedExpenseLine | Commentline)[] = [
+    ...leadingComments,
+  ];
   values.lines.forEach((line) => {
     expenselines.push(lineToPosting(line), ...line.trailingComments);
   });
@@ -627,7 +670,10 @@ export const buildTransactionText = (
  * seedFirstLine copies the total into the first line when moving to the
  * second page, unless the first line already has a different amount.
  */
-export const seedFirstLine = (values: Values, previousSeed: string | undefined): Values => {
+export const seedFirstLine = (
+  values: Values,
+  previousSeed: string | undefined,
+): Values => {
   const first = values.lines[0];
   if (!first || values.total.trim() === '') {
     return values;
@@ -639,7 +685,9 @@ export const seedFirstLine = (values: Values, previousSeed: string | undefined):
     if (i === 0) {
       return { ...line, amount: values.total, currency: values.currency };
     }
-    return line.amount === '' && !line.original ? { ...line, currency: values.currency } : line;
+    return line.amount === '' && !line.original
+      ? { ...line, currency: values.currency }
+      : line;
   });
   return { ...values, lines };
 };

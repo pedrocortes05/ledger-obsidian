@@ -42,8 +42,8 @@ export const ParseErrors: React.FC<{
       <summary>
         {errors.length === 1
           ? '1 problem in the ledger file'
-          : `${errors.length} problems in the ledger file`}
-        {' '}— balances may be incomplete
+          : `${errors.length} problems in the ledger file`}{' '}
+        — balances may be incomplete
       </summary>
       <ul>
         {errors.slice(0, 100).map((error, i) => {

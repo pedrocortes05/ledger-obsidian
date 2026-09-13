@@ -26,9 +26,9 @@ describe('formatTransaction()', () => {
     Assets:Checking    = $8816.51
     Income:Capital Gains`;
     const cache = parse(contents, settings);
-    expect(formatTransaction(cache.transactions[0], cache.commodityMap)).toEqual(
-      contents,
-    );
+    expect(
+      formatTransaction(cache.transactions[0], cache.commodityMap),
+    ).toEqual(contents);
   });
 
   test('new postings use the commodity style and keep precision', () => {
@@ -58,7 +58,10 @@ describe('formatTransaction()', () => {
   });
 
   test('explicit zero amounts are written', () => {
-    const cache = parse('2024/01/01 A\n  Assets:X  $0.00\n  Equity  $0', settings);
+    const cache = parse(
+      '2024/01/01 A\n  Assets:X  $0.00\n  Equity  $0',
+      settings,
+    );
     const tx = cache.transactions[0];
     tx.value.expenselines.forEach((line) => {
       line.raw = '';
@@ -110,7 +113,9 @@ describe('filterByAccount()', () => {
       settings,
     );
     expect(
-      cache.transactions.filter(filterByAccount('Assets:Cash')).map((t) => t.value.payee),
+      cache.transactions
+        .filter(filterByAccount('Assets:Cash'))
+        .map((t) => t.value.payee),
     ).toEqual(['B']);
   });
 });
@@ -141,7 +146,8 @@ describe('tags', () => {
   });
 
   test('removeTag()', () => {
-    expect(removeTag(block, 'unreviewed')).toEqual(`2026/09/14 ABONO SPEI  ; :bank:
+    expect(removeTag(block, 'unreviewed'))
+      .toEqual(`2026/09/14 ABONO SPEI  ; :bank:
     Assets:Checking    $4000.00  ; note
     ; :a:b:
     Income:Unknown`);
