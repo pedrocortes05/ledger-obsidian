@@ -13,12 +13,23 @@ import { removeTag } from './transaction-utils';
 import { Notice, TFile, Vault } from 'obsidian';
 
 export class LedgerModifier {
+  /**
+   * getTxCache returns the parsed contents of this modifier's file, which is
+   * not the default ledger file when a dashboard shows another .ledger file.
+   */
+  public readonly getTxCache: () => TransactionCache;
+
   private readonly plugin: LedgerPlugin;
   private ledgerFile: TFile;
 
-  constructor(plugin: LedgerPlugin, ledgerFile: TFile) {
+  constructor(
+    plugin: LedgerPlugin,
+    ledgerFile: TFile,
+    getTxCache?: () => TransactionCache,
+  ) {
     this.plugin = plugin;
     this.ledgerFile = ledgerFile;
+    this.getTxCache = getTxCache ?? (() => plugin.txCache);
   }
 
   public setLedgerFile(ledgerFile: TFile): void {

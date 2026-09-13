@@ -19,9 +19,15 @@ export const debounce = <T extends unknown[]>(fn: (...args: T) => unknown) => {
 };
 
 export class Modal {
-  public contentEl = document.createElement('div');
+  public contentEl = Object.assign(document.createElement('div'), {
+    empty(this: HTMLElement): void {
+      this.replaceChildren();
+    },
+  });
   public titleEl = document.createElement('div');
-  public modalEl = document.createElement('div');
+  public modalEl = Object.assign(document.createElement('div'), {
+    addClass: (): void => undefined,
+  });
   constructor(public app: unknown) {}
   public open(): void {
     (this as unknown as { onOpen: () => void }).onOpen();

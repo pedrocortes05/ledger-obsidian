@@ -43,7 +43,7 @@ export class AddExpenseModal extends Modal {
         operation: this.operation,
         prefill: this.prefill,
         updater: this.updater,
-        txCache: this.plugin.txCache,
+        txCache: this.updater.getTxCache(),
         close: () => this.close(),
       }),
       this.contentEl,

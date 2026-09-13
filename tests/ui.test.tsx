@@ -1,10 +1,12 @@
 import { LedgerModifier } from '../src/file-interface';
+import LedgerPlugin from '../src/main';
+import { AddExpenseModal } from '../src/modals';
 import { parse } from '../src/parser';
 import { settingsWithDefaults } from '../src/settings';
 import { emptyTransaction } from '../src/transaction-utils';
 import { EditTransaction } from '../src/ui/EditTransaction';
 import { LedgerDashboard } from '../src/ui/LedgerDashboard';
-import { Platform } from 'obsidian';
+import { Platform, TFile } from 'obsidian';
 import React from 'react';
 import ReactDOM from 'react-dom';
 import { act } from 'react-dom/test-utils';
@@ -137,6 +139,77 @@ describe.each([false, true])('LedgerDashboard (mobile: %s)', (mobile) => {
     });
     expect(container.textContent).toContain('Opening');
   });
+});
+
+test('autofill on leaving the payee keeps the typed total', () => {
+  Platform.isMobile = false;
+  act(() => {
+    ReactDOM.render(
+      <EditTransaction
+        displayFileWarning={false}
+        settings={settings}
+        initialState={emptyTransaction}
+        operation="new"
+        updater={updater}
+        txCache={txCache}
+        close={jest.fn()}
+      />,
+      container,
+    );
+  });
+  const total = container.querySelector(
+    'input[placeholder="Total amount"]',
+  ) as HTMLInputElement;
+  type(total, '25.00');
+  const payee = container.querySelector(
+    'input[placeholder^="Payee"]',
+  ) as HTMLInputElement;
+  type(payee, 'Groceries');
+  act(() => {
+    payee.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+  });
+  expect(container.textContent).toContain('Filled in from the');
+  expect(total.value).toEqual('25.00');
+
+  click(buttonWithText('Next'));
+  const amounts = [
+    ...container.querySelectorAll('.ledger-amount input'),
+  ] as HTMLInputElement[];
+  expect(amounts.map((input) => input.value)).toEqual(['25.00', '-50.00', '']);
+});
+
+test('the add modal uses the transactions of the file it writes to', () => {
+  const other = parse(
+    `${d(3)} Bakery
+    Expenses:Bread    $7.00
+    Assets:Wallet`,
+    settings,
+  );
+  const plugin = {
+    app: {},
+    settings,
+    txCache,
+  } as unknown as LedgerPlugin;
+  const modifier = new LedgerModifier(plugin, {} as TFile, () => other);
+  const modal = new AddExpenseModal(plugin, modifier, 'new');
+  document.body.appendChild(modal.contentEl);
+  act(() => {
+    modal.open();
+  });
+  const payee = modal.contentEl.querySelector(
+    'input[placeholder^="Payee"]',
+  ) as HTMLInputElement;
+  act(() => {
+    payee.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  });
+  const suggestions = [...document.querySelectorAll('.suggestion-item')].map(
+    (el) => el.textContent,
+  );
+  expect(suggestions).toEqual(['Bakery']);
+  act(() => {
+    modal.close();
+  });
+  modal.contentEl.remove();
 });
 
 test('EditTransaction adds a transaction end to end', async () => {

@@ -90,7 +90,11 @@ export class LedgerView extends FileView {
   }
 
   public async onLoadFile(file: TFile): Promise<void> {
-    this.updateInterface = new LedgerModifier(this.plugin, file);
+    this.updateInterface = new LedgerModifier(
+      this.plugin,
+      file,
+      () => this.txCache ?? this.plugin.txCache,
+    );
     this.txCache = this.isDefaultFile(file)
       ? this.plugin.txCache
       : await getTransactionCache(
