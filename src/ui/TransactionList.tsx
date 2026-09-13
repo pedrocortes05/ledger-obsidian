@@ -1,354 +1,252 @@
+import { formatAmountMap } from '../amounts';
 import { LedgerModifier } from '../file-interface';
+import { EnhancedTransaction, getPostings, TransactionCache } from '../parser';
 import {
-  EnhancedExpenseLine,
-  EnhancedTransaction,
-  TransactionCache,
-} from '../parser';
-import {
-  filterByAccount,
-  filterByEndDate,
-  filterByStartDate,
-  filterTransactions,
-  getTotal,
+  getTransactionTotal,
+  hasTag,
+  sortByDateDesc,
+  wrapVirtual,
 } from '../transaction-utils';
-import { Moment } from 'moment';
 import React from 'react';
-import { Column, useFilters, useSortBy, useTable } from 'react-table';
 import styled from 'styled-components';
 
-export const MobileTransactionList: React.FC<{
-  currencySymbol: string;
-  txCache: TransactionCache;
-}> = (props): JSX.Element => (
-  // TODO: Add pagination to see more than just the most recent 10 transactions
-  // TODO: Key should be based on transaction itself, not list index
-  <div>
-    {props.txCache.transactions
-      .reverse()
-      .slice(0, 10)
-      .map(
-        (tx, i): JSX.Element => (
-          <MobileTransactionEntry
-            key={i}
-            tx={tx}
-            currencySymbol={props.currencySymbol}
-          />
-        ),
-      )}
-  </div>
-);
-
-export const MobileTransactionEntry: React.FC<{
-  tx: EnhancedTransaction;
-  currencySymbol: string;
-}> = (props): JSX.Element => {
-  const nonCommentLines = props.tx.value.expenselines.filter(
-    (line): line is EnhancedExpenseLine => 'account' in line,
-  );
-  if (nonCommentLines.length < 2) {
-    // This should not make it past the parser, but this is necessary for type checking.
-    throw new Error('Unexpected transaction with fewer than two account lines');
-  }
-
-  return (
-    <div>
-      <h3>{props.tx.value.payee}</h3>
-      <div>From: {(nonCommentLines.last() as EnhancedExpenseLine).account}</div>
-      <div>Amount: {getTotal(props.tx, props.currencySymbol)}</div>
-    </div>
-  );
-};
+export const UNREVIEWED_TAG = 'unreviewed';
 
 const TableStyles = styled.div`
-  padding-right: 1rem;
+  overflow-x: auto;
 
   table {
     width: 100%;
     border-spacing: 0;
     border: 1px solid var(--background-modifier-border);
-
-    tr {
-      :last-child {
-        td {
-          border-bottom: 0;
-        }
-      }
-      :hover {
-        background: var(--background-secondary);
-      }
-    }
-
-    th {
-      text-align: left;
-      background: var(--background-primary-alt);
-    }
-
-    th,
-    td {
-      margin: 0;
-      padding: 0.5rem;
-      border-bottom: 1px solid var(--background-modifier-border);
-    }
   }
 
-  tr:hover svg {
-    fill: var(--text-muted);
+  tr:hover {
+    background: var(--background-secondary);
   }
 
-  svg {
-    margin-left: 10px;
-    cursor: pointer;
-    fill: none;
-    stroke: none;
+  th {
+    text-align: left;
+    background: var(--background-primary-alt);
+  }
+
+  th,
+  td {
+    margin: 0;
+    padding: 0.4rem 0.5rem;
+    border-bottom: 1px solid var(--background-modifier-border);
+    vertical-align: top;
+  }
+
+  td.ledger-amount-cell {
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  .ledger-muted {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+  }
+
+  .ledger-row-actions {
+    white-space: nowrap;
+  }
+
+  .ledger-row-actions button {
+    background: none;
+    box-shadow: none;
+    padding: 2px 6px;
+    margin: 0;
+    color: var(--text-muted);
+    visibility: hidden;
+  }
+
+  tr:hover .ledger-row-actions button,
+  .ledger-row-actions button:focus {
+    visibility: visible;
+  }
+
+  .ledger-card {
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding: 8px 0;
+  }
+
+  .ledger-card-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .ledger-card .ledger-row-actions button {
+    visibility: visible;
   }
 `;
 
-interface TableRow {
-  date: string;
-  payee: string;
+interface Row {
+  tx: EnhancedTransaction;
   total: string;
   from: string;
-  to: string | JSX.Element;
-  actions: JSX.Element;
+  to: string;
+  budget?: string;
+  unreviewed: boolean;
 }
 
-const buildTableRows = (
-  transactions: EnhancedTransaction[],
-  currencySymbol: string,
-  updater: LedgerModifier,
-): TableRow[] => {
-  const makeClone = (tx: EnhancedTransaction): JSX.Element => (
-    <>
-      <svg
-        onClick={() => {
-          updater.openExpenseModal('modify', tx);
-        }}
-        width="16"
-        height="16"
-        version="1.1"
-        viewBox="0 0 100 100"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path
-          transform="scale(5.5556)"
-          d="m15.533 0.63086c-0.474 0-0.94594 0.18813-1.3047 0.54688l-0.35156 0.35156 2.5938 2.5938 0.35156-0.35156c0.71861-0.71861 0.71861-1.8927 0-2.6113h-2e-3v-0.00195c-0.35848-0.33966-0.83006-0.52735-1.2871-0.52735zm-2.0957 1.457-0.0098 0.00195c-0.10358 0.020715-0.19358 0.06467-0.26172 0.13281l-11.668 11.67c-0.073201 0.0488-0.12225 0.12572-0.14453 0.21484l-0.7207 2.6973c-0.044708 0.15648 0.002068 0.32043 0.11328 0.43164 0.11121 0.11121 0.27321 0.15604 0.42969 0.11133l2.7012-0.71875 0.00391-2e-3c0.071076-0.02369 0.13619-0.06783 0.19727-0.12891l11.682-11.682c0.17582-0.17582 0.17582-0.45699 0-0.63281-0.17582-0.17582-0.45504-0.17582-0.63086 0l-11.547 11.564-1.3301-1.3301 11.564-11.564c0.1309-0.1309 0.17558-0.33127 0.08594-0.49609-0.07115-0.17891-0.24833-0.26953-0.41992-0.26953z"
-        />
-      </svg>
-      <svg
-        onClick={() => {
-          updater.openExpenseModal('clone', tx);
-        }}
-        width="16"
-        height="16"
-        version="1.1"
-        viewBox="0 0 28 28"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path d="m2 2h16v4h2v-4c0-1.1046-0.89543-2-2-2h-16c-1.1046 0-2 0.89543-2 2v16c0 1.1046 0.89543 2 2 2h4v-2h-4z" />
-        <path d="m26 8h-16c-1.1046 0-2 0.89543-2 2v16c0 1.1046 0.89543 2 2 2h16c1.1046 0 2-0.89543 2-2v-16c0-1.1046-0.89543-2-2-2zm0 18h-16v-16h16z" />
-        <path d="m17 24h2v-5h5v-2h-5v-5h-2v5h-5v2h5z" />
-      </svg>
-      <svg
-        onClick={() => updater.deleteTransaction(tx)}
-        width="16"
-        height="16"
-        version="1.1"
-        viewBox="0 0 28 28"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path d="m6.6465 5.2324-1.4141 1.4141 7.3535 7.3535-7.3535 7.3535 1.4141 1.4141 7.3535-7.3535 7.3535 7.3535 1.4141-1.4141-7.3535-7.3535 7.3535-7.3535-1.4141-1.4141-7.3535 7.3535-7.3535-7.3535z" />
-      </svg>
-    </>
-  );
-
-  const tableRows = transactions.map((tx: EnhancedTransaction): TableRow => {
-    const nonCommentLines = tx.value.expenselines.filter(
-      (line): line is EnhancedExpenseLine => 'account' in line,
-    );
-
-    if (nonCommentLines.length < 2) {
-      // This should not make it past the parser, but this is necessary for type checking.
-      throw new Error(
-        'Unexpected transaction with fewer than two account lines',
-      );
-    }
-
-    if (nonCommentLines.length === 2) {
-      // If there are only two lines, then this is a simple 'from->to' transaction
-      return {
-        date: tx.value.date,
-        payee: tx.value.payee,
-        total: getTotal(tx, currencySymbol),
-        from: nonCommentLines[1].account,
-        to: nonCommentLines[0].account,
-        actions: makeClone(tx),
-      };
-    }
-    // Otherwise, there are multiple 'to' lines to consider
-    return {
-      date: tx.value.date,
-      payee: tx.value.payee,
-      total: getTotal(tx, currencySymbol),
-      from: nonCommentLines[nonCommentLines.length - 1].account,
-      to: <i>Multiple</i>,
-      actions: makeClone(tx),
-    };
-  });
-
-  // Sort so most recent transactions come first
-  tableRows.sort((a, b): number => {
-    const aDate = window.moment(a.date);
-    const bDate = window.moment(b.date);
-    if (aDate.isSame(bDate)) {
-      return 0;
-    }
-    return aDate.isBefore(bDate) ? 1 : -1;
-  });
-
-  return tableRows;
+const describeAccounts = (accounts: string[]): string => {
+  const unique = [...new Set(accounts)];
+  if (unique.length === 0) {
+    return '';
+  }
+  return unique.length === 1 ? unique[0] : `${unique[0]} +${unique.length - 1}`;
 };
 
-// TODO: Clicking in a transaction should open it in the transaction modal and allow editing.
+export const makeRow = (
+  tx: EnhancedTransaction,
+  txCache: TransactionCache,
+): Row => {
+  const postings = getPostings(tx);
+  const real = postings.filter((p) => p.virtual === '');
+  const virtual = postings.filter((p) => p.virtual !== '');
+  return {
+    tx,
+    total: formatAmountMap(getTransactionTotal(tx), txCache.commodityMap),
+    from: describeAccounts(
+      real.filter((p) => p.amounts.some((a) => a.quantity < 0)).map((p) => p.account),
+    ),
+    to: describeAccounts(
+      real.filter((p) => p.amounts.some((a) => a.quantity >= 0)).map((p) => p.account),
+    ),
+    budget: virtual.length
+      ? virtual.map((p) => wrapVirtual(p.account, p.virtual)).join(', ')
+      : undefined,
+    unreviewed: hasTag(tx, UNREVIEWED_TAG),
+  };
+};
 
-export const RecentTransactionList: React.FC<{
-  currencySymbol: string;
+const RowActions: React.FC<{
+  row: Row;
+  updater: LedgerModifier;
+}> = ({ row, updater }): JSX.Element => (
+  <span className="ledger-row-actions">
+    {row.unreviewed ? (
+      <button
+        title="Mark reviewed"
+        aria-label="Mark reviewed"
+        onClick={() => updater.removeTag(row.tx, UNREVIEWED_TAG)}
+      >
+        ✓
+      </button>
+    ) : null}
+    <button
+      title="Edit"
+      aria-label="Edit"
+      onClick={() => updater.openExpenseModal('modify', row.tx)}
+    >
+      ✎
+    </button>
+    <button
+      title="Copy"
+      aria-label="Copy"
+      onClick={() => updater.openExpenseModal('clone', row.tx)}
+    >
+      ⧉
+    </button>
+    <button
+      title="Delete"
+      aria-label="Delete"
+      onClick={() => updater.deleteTransaction(row.tx)}
+    >
+      ✕
+    </button>
+  </span>
+);
+
+const PAGE_SIZE = 50;
+
+/**
+ * TransactionTable lists transactions, most recent first. On mobile it
+ * renders cards instead of a table.
+ */
+export const TransactionTable: React.FC<{
+  transactions: EnhancedTransaction[];
   txCache: TransactionCache;
   updater: LedgerModifier;
-  startDate: Moment;
-  endDate: Moment;
+  mobile?: boolean;
+  limit?: number;
+  emptyMessage?: string;
 }> = (props): JSX.Element => {
-  const data = React.useMemo(() => {
-    let filteredTransactions = filterTransactions(
-      props.txCache.transactions,
-      filterByStartDate(props.startDate),
-    );
-    filteredTransactions = filterTransactions(
-      filteredTransactions,
-      filterByEndDate(props.endDate),
-    );
-    if (filteredTransactions.length > 10) {
-      filteredTransactions = filteredTransactions.slice(-10);
-    }
-    return buildTableRows(
-      filteredTransactions,
-      props.currencySymbol,
-      props.updater,
-    );
-  }, [props.txCache, props.startDate, props.endDate]);
-  return (
-    <>
-      <h2>Last 10 Transactions for Selected Dates</h2>
-      <TransactionTable data={data} />
-    </>
+  const [visible, setVisible] = React.useState(props.limit ?? PAGE_SIZE);
+  const rows = React.useMemo(
+    () =>
+      sortByDateDesc(props.transactions)
+        .slice(0, visible)
+        .map((tx) => makeRow(tx, props.txCache)),
+    [props.transactions, props.txCache, visible],
   );
-};
 
-export const TransactionList: React.FC<{
-  currencySymbol: string;
-  txCache: TransactionCache;
-  updater: LedgerModifier;
-  selectedAccounts: string[];
-  setSelectedAccount: (accountName: string) => void;
-  startDate: Moment;
-  endDate: Moment;
-}> = (props): JSX.Element => {
-  const data = React.useMemo(() => {
-    // Filters are applied sequentially when they need to be and-ed together.
-    // This might not be the most efficient solution...
-    let filteredTransactions = filterTransactions(
-      props.txCache.transactions,
-      ...props.selectedAccounts.map((a) => filterByAccount(a)),
-    );
-    filteredTransactions = filterTransactions(
-      filteredTransactions,
-      filterByStartDate(props.startDate),
-    );
-    filteredTransactions = filterTransactions(
-      filteredTransactions,
-      filterByEndDate(props.endDate),
-    );
-    return buildTableRows(
-      filteredTransactions,
-      props.currencySymbol,
-      props.updater,
-    );
-  }, [props.txCache, props.selectedAccounts, props.startDate, props.endDate]);
-
-  return <TransactionTable data={data} />;
-};
-
-const TransactionTable: React.FC<{
-  data: TableRow[];
-}> = ({ data }): JSX.Element => {
-  if (data.length === 0) {
-    // TODO: Style and center this
-    return <p>No transactions for the selected time period.</p>;
+  if (props.transactions.length === 0) {
+    return <p>{props.emptyMessage ?? 'No transactions for the selected dates.'}</p>;
   }
 
-  const columns = React.useMemo<Column[]>(
-    () => [
-      {
-        Header: 'Date',
-        accessor: 'date',
-      },
-      {
-        Header: 'Payee',
-        accessor: 'payee',
-      },
-      {
-        Header: 'Total',
-        accessor: 'total',
-      },
-      {
-        Header: 'From Account',
-        accessor: 'from',
-      },
-      {
-        Header: 'To Account',
-        accessor: 'to',
-      },
-      {
-        Header: '',
-        accessor: 'actions',
-      },
-    ],
-    [],
-  );
-  const tableInstance = useTable({ columns, data }, useFilters, useSortBy);
+  const more =
+    props.limit === undefined && props.transactions.length > visible ? (
+      <button onClick={() => setVisible(visible + PAGE_SIZE)}>
+        Show more ({props.transactions.length - visible} remaining)
+      </button>
+    ) : null;
 
-  const { getTableProps, getTableBodyProps, headerGroups, rows, prepareRow } =
-    tableInstance;
+  if (props.mobile) {
+    return (
+      <TableStyles>
+        {rows.map((row) => (
+          <div className="ledger-card" key={`${row.tx.block.firstLine}-${row.tx.value.payee}`}>
+            <div className="ledger-card-header">
+              <strong>{row.tx.value.payee}</strong>
+              <span>{row.total}</span>
+            </div>
+            <div className="ledger-muted">
+              {row.tx.value.date} · {row.from} → {row.to}
+              {row.budget ? ` · ${row.budget}` : ''}
+            </div>
+            <RowActions row={row} updater={props.updater} />
+          </div>
+        ))}
+        {more}
+      </TableStyles>
+    );
+  }
 
   return (
     <TableStyles>
-      <table {...getTableProps()}>
+      <table>
         <thead>
-          {headerGroups.map((headerGroup) => (
-            <tr {...headerGroup.getHeaderGroupProps()}>
-              {headerGroup.headers.map((column) => (
-                <th {...column.getHeaderProps(column.getSortByToggleProps())}>
-                  {column.render('Header')}
-                  <span>
-                    {column.isSorted ? (column.isSortedDesc ? ' ↑' : ' ↓') : ''}
-                  </span>
-                </th>
-              ))}
+          <tr>
+            <th>Date</th>
+            <th>Payee</th>
+            <th>Total</th>
+            <th>From</th>
+            <th>To</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.tx.block.firstLine}-${row.tx.value.payee}`}>
+              <td>{row.tx.value.date}</td>
+              <td>
+                {row.tx.value.payee}
+                {row.budget ? <div className="ledger-muted">{row.budget}</div> : null}
+              </td>
+              <td className="ledger-amount-cell">{row.total}</td>
+              <td>{row.from}</td>
+              <td>{row.to}</td>
+              <td>
+                <RowActions row={row} updater={props.updater} />
+              </td>
             </tr>
           ))}
-        </thead>
-        <tbody {...getTableBodyProps()}>
-          {rows.map((row) => {
-            prepareRow(row);
-            return (
-              <tr {...row.getRowProps()}>
-                {row.cells.map((cell) => (
-                  <td {...cell.getCellProps()}>{cell.render('Cell')}</td>
-                ))}
-              </tr>
-            );
-          })}
         </tbody>
       </table>
+      {more}
     </TableStyles>
   );
 };

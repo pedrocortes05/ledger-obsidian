@@ -1,114 +1,95 @@
+import { isAccountOrChild } from '../account-utils';
+import { formatAmount } from '../amounts';
+import { BalanceHistory } from '../balance-utils';
 import type { TransactionCache } from '../parser';
 import { ISettings } from '../settings';
-import {
-  dealiasAccount,
-  makeAccountTree,
-  Node,
-  sortAccountTree,
-} from '../transaction-utils';
+import { makeAccountTree, Node, sortAccountTree } from '../transaction-utils';
 import React from 'react';
 import styled from 'styled-components';
 
 const TreeRow = styled.div`
-  margin-right: 10px;
   display: flex;
-  align-items: stretch;
+  align-items: baseline;
+  gap: 4px;
+  padding-right: 6px;
+  cursor: pointer;
 
-  .selected {
+  &.selected {
     background-color: var(--background-secondary);
   }
-`;
 
-const AccountName = styled.span`
-  flex-grow: 1;
-  margin-bottom: 2px;
-  padding: 1px 6px;
-
-  :hover {
+  &:hover {
     background-color: var(--background-primary-alt);
   }
-`;
 
-const Expander = styled.span`
-  flex-grow: 0;
-  display: inline-block;
-  width: 15px;
+  .ledger-expander {
+    flex: 0 0 15px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  .ledger-account-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 1px 0;
+  }
+
+  .ledger-account-balance {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+    font-variant-numeric: tabular-nums;
+  }
 `;
 
 const Tree: React.FC<{
-  txCache: TransactionCache;
-  settings: ISettings;
   data: Node;
   depth: number;
+  balanceText: (account: string) => string;
   selectedAccounts: string[];
-  setSelectedAccounts: React.Dispatch<React.SetStateAction<string[]>>;
+  toggle: (account: string) => void;
 }> = (props): JSX.Element => {
   const [expanded, setExpanded] = React.useState(props.data.expanded || false);
   const subRows = props.data.subRows;
   const hasChildren = subRows !== undefined && subRows.length > 0;
-
   const id = props.data.id;
-  const selected = props.selectedAccounts.contains(id);
-  const toggleSelected = (): void => {
-    if (selected) {
-      props.setSelectedAccounts(
-        props.selectedAccounts.filter((account) => account !== id),
-      );
-    } else {
-      const newSelected = [...props.selectedAccounts, id];
-      if (
-        props.txCache.assetAccounts.contains(id) ||
-        props.txCache.liabilityAccounts.contains(id)
-      ) {
-        props.setSelectedAccounts(
-          deselectRowsWithoutPrefix(newSelected, [
-            props.settings.assetAccountsPrefix,
-            props.settings.liabilityAccountsPrefix,
-          ]),
-        );
-      } else if (
-        props.txCache.expenseAccounts.contains(id) ||
-        props.txCache.incomeAccounts.contains(id)
-      ) {
-        props.setSelectedAccounts(
-          deselectRowsWithoutPrefix(newSelected, [
-            props.settings.expenseAccountsPrefix,
-            props.settings.incomeAccountsPrefix,
-          ]),
-        );
-      } else {
-        props.setSelectedAccounts(newSelected);
-      }
-    }
-  };
+  const selected = props.selectedAccounts.includes(id);
 
   return (
     <>
-      <TreeRow style={{ paddingLeft: `${props.depth}rem` }}>
-        {hasChildren ? (
-          <Expander onClick={() => setExpanded(!expanded)}>
-            {expanded ? '-' : '+'}
-          </Expander>
-        ) : (
-          <Expander />
-        )}
-        <AccountName
-          className={selected ? 'selected' : ''}
-          onClick={toggleSelected}
+      <TreeRow
+        className={selected ? 'selected' : ''}
+        style={{ paddingLeft: `${props.depth}rem` }}
+      >
+        <span
+          className="ledger-expander"
+          onClick={() => hasChildren && setExpanded(!expanded)}
+        >
+          {hasChildren ? (expanded ? '−' : '+') : ''}
+        </span>
+        <span
+          className="ledger-account-name"
+          title={id}
+          onClick={() => props.toggle(id)}
         >
           {props.data.account}
-        </AccountName>
+        </span>
+        <span className="ledger-account-balance" onClick={() => props.toggle(id)}>
+          {props.balanceText(id)}
+        </span>
       </TreeRow>
       {hasChildren && expanded && subRows
         ? subRows.map((child) => (
             <Tree
-              txCache={props.txCache}
-              settings={props.settings}
-              data={child}
               key={child.id}
+              data={child}
               depth={props.depth + 1}
+              balanceText={props.balanceText}
               selectedAccounts={props.selectedAccounts}
-              setSelectedAccounts={props.setSelectedAccounts}
+              toggle={props.toggle}
             />
           ))
         : null}
@@ -116,51 +97,91 @@ const Tree: React.FC<{
   );
 };
 
+const accountGroup = (account: string, settings: ISettings, txCache: TransactionCache): string => {
+  if (
+    isAccountOrChild(account, settings.assetAccountsPrefix) ||
+    isAccountOrChild(account, settings.liabilityAccountsPrefix)
+  ) {
+    return 'balance';
+  }
+  if (
+    isAccountOrChild(account, settings.expenseAccountsPrefix) ||
+    isAccountOrChild(account, settings.incomeAccountsPrefix)
+  ) {
+    return 'flow';
+  }
+  return txCache.virtualAccounts.some((v) => isAccountOrChild(v, account))
+    ? 'virtual'
+    : 'other';
+};
+
+/**
+ * nextSelection toggles an account. Selecting an account of a different kind
+ * (balance sheet vs. income/expense vs. budget) starts a new selection so the
+ * chart stays meaningful.
+ */
+export const nextSelection = (
+  selected: string[],
+  account: string,
+  settings: ISettings,
+  txCache: TransactionCache,
+): string[] => {
+  if (selected.includes(account)) {
+    return selected.filter((a) => a !== account);
+  }
+  const group = accountGroup(account, settings, txCache);
+  return [
+    ...selected.filter((a) => accountGroup(a, settings, txCache) === group),
+    account,
+  ];
+};
+
 export const AccountsList: React.FC<{
   txCache: TransactionCache;
   settings: ISettings;
+  history: BalanceHistory;
+  commodity: string;
+  endISO: string;
   selectedAccounts: string[];
-  setSelectedAccounts: React.Dispatch<React.SetStateAction<string[]>>;
+  setSelectedAccounts: (accounts: string[]) => void;
 }> = (props): JSX.Element => {
   const data = React.useMemo(() => {
     const nodes: Node[] = [];
     props.txCache.accounts.forEach((account: string) => {
-      makeAccountTree(nodes, dealiasAccount(account, props.txCache.aliases));
+      makeAccountTree(nodes, account);
     });
     sortAccountTree(nodes);
-
-    // By default, the top level starts expanded
     nodes.forEach((node) => (node.expanded = true));
     return nodes;
   }, [props.txCache]);
+
+  const balanceText = (account: string): string => {
+    const quantity = props.history.balanceAt(account, props.endISO).get(props.commodity);
+    if (quantity === undefined || Math.abs(quantity) < 1e-8) {
+      return '';
+    }
+    return formatAmount(
+      { commodity: props.commodity, quantity },
+      props.txCache.commodityMap.get(props.commodity),
+    );
+  };
 
   return (
     <div className="ledger-account-list">
       {data.map((root) => (
         <Tree
-          txCache={props.txCache}
-          settings={props.settings}
-          data={root}
           key={root.id}
+          data={root}
           depth={0}
+          balanceText={balanceText}
           selectedAccounts={props.selectedAccounts}
-          setSelectedAccounts={props.setSelectedAccounts}
+          toggle={(account) =>
+            props.setSelectedAccounts(
+              nextSelection(props.selectedAccounts, account, props.settings, props.txCache),
+            )
+          }
         />
       ))}
     </div>
   );
 };
-
-/**
- * deselecteRowsWithoutPrefix filters the provided list of accounts, removing
- * ones which do not start with one of the provided prefixes. This can be used
- * to make sure the selected accounts are all of the same type, which helps
- * ensure the visualization fits the account type.
- */
-const deselectRowsWithoutPrefix = (
-  selectedAccounts: string[],
-  prefixes: string[],
-): string[] =>
-  selectedAccounts.filter((account) =>
-    prefixes.some((prefix) => account.startsWith(prefix)),
-  );

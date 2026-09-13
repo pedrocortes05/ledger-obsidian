@@ -1,198 +1,478 @@
+import { isAccountOrChild } from '../account-utils';
+import { BalanceHistory } from '../balance-utils';
 import {
-  makeDailyAccountBalanceChangeMap,
-  makeDailyBalanceMap,
-} from '../balance-utils';
-import { Interval } from '../date-utils';
+  DatePreset,
+  fromISO,
+  Interval,
+  makeBuckets,
+  presetRange,
+  suggestInterval,
+  toISO,
+} from '../date-utils';
 import { LedgerModifier } from '../file-interface';
 import type { TransactionCache } from '../parser';
 import { ISettings } from '../settings';
-import { AccountsList } from './AccountsList';
-import { AccountVisualization } from './AccountVisualization';
-import { DateRangeSelector } from './DateRangeSelector';
-import { NetWorthVisualization } from './NetWorthVisualization';
-import { ParseErrors } from './ParseErrors';
 import {
-  FlexContainer,
-  FlexFloatRight,
-  FlexMainContent,
-  FlexShrink,
-} from './SharedStyles';
-import { RecentTransactionList, TransactionList } from './TransactionList';
+  filterByAccount,
+  filterByEndDate,
+  filterByStartDate,
+  filterByTag,
+  filterTransactions,
+} from '../transaction-utils';
+import { AccountsList } from './AccountsList';
+import { BudgetTable } from './BudgetTable';
+import { AccountChart, NetWorthChart } from './Charts';
+import { DateRangeSelector } from './DateRangeSelector';
+import { ParseErrors } from './ParseErrors';
+import { TransactionTable, UNREVIEWED_TAG } from './TransactionList';
 import { Step, Steps } from 'intro.js-react';
+import { Moment } from 'moment';
 import { Platform } from 'obsidian';
 import React from 'react';
 import styled from 'styled-components';
 
-const FlexSidebar = styled(FlexShrink)`
-  flex-basis: 20%;
+const Layout = styled.div`
+  .ledger-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .ledger-header h2 {
+    margin: 0;
+  }
+
+  .ledger-body {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+
+  .ledger-sidebar {
+    flex: 0 0 22%;
+    min-width: 180px;
+    max-height: calc(100vh - 160px);
+    overflow-y: auto;
+  }
+
+  .ledger-main {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .ledger-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 12px 0;
+  }
+
+  .ledger-tabs button {
+    margin: 0;
+  }
+
+  .ledger-badge {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-radius: 8px;
+    padding: 0 6px;
+    margin-left: 4px;
+    font-size: var(--font-ui-smaller);
+  }
+
+  .ledger-selected-accounts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+
+  &.ledger-mobile .ledger-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
 `;
 
-export const LedgerDashboard: React.FC<{
+type Tab = 'overview' | 'budgets' | 'unreviewed' | 'accounts';
+
+/**
+ * useDashboardState holds the date range, selection and commodity shared by
+ * the desktop and mobile dashboards.
+ */
+const useDashboardState = (props: { settings: ISettings; txCache: TransactionCache }) => {
+  const { txCache, settings } = props;
+  const lastDate = React.useMemo(
+    () =>
+      txCache.transactions.reduce(
+        (max, tx) => (tx.value.dateISO > max ? tx.value.dateISO : max),
+        toISO(window.moment()),
+      ),
+    [txCache],
+  );
+
+  const [preset, setPresetState] = React.useState<DatePreset>('last-3-months');
+  const initialRange = presetRange('last-3-months', txCache.firstDate, fromISO(lastDate));
+  const [startDate, setStartDate] = React.useState<Moment>(initialRange.start);
+  const [endDate, setEndDate] = React.useState<Moment>(initialRange.end);
+  const [interval, setInterval] = React.useState<Interval>(
+    suggestInterval(initialRange.start, initialRange.end),
+  );
+  const [selectedAccounts, setSelectedAccounts] = React.useState<string[]>([]);
+  const [tab, setTab] = React.useState<Tab>('overview');
+
+  const commodities = React.useMemo(
+    () => txCache.commodities.filter((c) => c.count > 0).map((c) => c.symbol),
+    [txCache],
+  );
+  const preferredCommodity = commodities.includes(settings.currencySymbol)
+    ? settings.currencySymbol
+    : commodities[0] ?? settings.currencySymbol;
+  const [commodity, setCommodity] = React.useState(preferredCommodity);
+  React.useEffect(() => {
+    if (!commodities.includes(commodity)) {
+      setCommodity(preferredCommodity);
+    }
+  }, [commodities]);
+
+  // Keep preset ranges up to date when the file changes (e.g. "All time").
+  React.useEffect(() => {
+    if (preset !== 'custom') {
+      const range = presetRange(preset, txCache.firstDate, fromISO(lastDate));
+      setStartDate(range.start);
+      setEndDate(range.end);
+    }
+  }, [txCache]);
+
+  const setPreset = (newPreset: DatePreset): void => {
+    setPresetState(newPreset);
+    if (newPreset === 'custom') {
+      return;
+    }
+    const range = presetRange(newPreset, txCache.firstDate, fromISO(lastDate));
+    setStartDate(range.start);
+    setEndDate(range.end);
+    setInterval(suggestInterval(range.start, range.end));
+  };
+
+  const setRange = (start: Moment, end: Moment): void => {
+    setPresetState('custom');
+    setStartDate(start);
+    setEndDate(end);
+  };
+
+  const history = React.useMemo(() => new BalanceHistory(txCache.transactions), [txCache]);
+  const startISO = toISO(startDate);
+  const endISO = toISO(endDate);
+  const buckets = React.useMemo(
+    () => makeBuckets(interval, startDate, endDate),
+    [interval, startISO, endISO],
+  );
+  const inRange = React.useMemo(
+    () =>
+      filterTransactions(
+        filterTransactions(txCache.transactions, filterByStartDate(startISO)),
+        filterByEndDate(endISO),
+      ),
+    [txCache, startISO, endISO],
+  );
+  const unreviewed = React.useMemo(
+    () => filterTransactions(txCache.transactions, filterByTag(UNREVIEWED_TAG)),
+    [txCache],
+  );
+  const selectedTransactions = React.useMemo(
+    () =>
+      selectedAccounts.length === 0
+        ? []
+        : filterTransactions(inRange, ...selectedAccounts.map((a) => filterByAccount(a))),
+    [inRange, selectedAccounts],
+  );
+  const isFlowAccount = selectedAccounts.some(
+    (a) =>
+      isAccountOrChild(a, settings.expenseAccountsPrefix) ||
+      isAccountOrChild(a, settings.incomeAccountsPrefix),
+  );
+
+  return {
+    preset,
+    setPreset,
+    startDate,
+    endDate,
+    setRange,
+    interval,
+    setInterval,
+    selectedAccounts,
+    setSelectedAccounts,
+    tab,
+    setTab,
+    commodities,
+    commodity,
+    setCommodity,
+    history,
+    startISO,
+    endISO,
+    buckets,
+    inRange,
+    unreviewed,
+    selectedTransactions,
+    isFlowAccount,
+  };
+};
+
+type DashboardState = ReturnType<typeof useDashboardState>;
+
+interface DashboardProps {
   tutorialIndex: number;
   setTutorialIndex: (index: number) => void;
   settings: ISettings;
   txCache: TransactionCache;
   updater: LedgerModifier;
-}> = (props): JSX.Element => {
-  if (!props.txCache) {
-    return <p>Loading...</p>;
-  }
+}
 
+export const LedgerDashboard: React.FC<DashboardProps> = (props): JSX.Element => {
   const [tutorialIndex, setTutorialIndex] = React.useState(props.tutorialIndex);
+  const state = useDashboardState(props);
   const setTutorialIndexWrapper = (index: number): void => {
-    setTutorialIndex(index); // This updates the current state
-    props.setTutorialIndex(index); // This updates the saved state
+    setTutorialIndex(index);
+    props.setTutorialIndex(index);
   };
 
   return Platform.isMobile ? (
-    <MobileDashboard settings={props.settings} txCache={props.txCache} />
+    <MobileDashboard {...props} state={state} />
   ) : (
     <DesktopDashboard
+      {...props}
       tutorialIndex={tutorialIndex}
       setTutorialIndex={setTutorialIndexWrapper}
-      settings={props.settings}
-      txCache={props.txCache}
-      updater={props.updater}
+      state={state}
     />
   );
 };
 
-const Header: React.FC<{}> = (props): JSX.Element => (
-  <div>
-    <FlexContainer>
-      <FlexSidebar>
-        <h2>Ledger</h2>
-      </FlexSidebar>
-      <FlexFloatRight>{props.children}</FlexFloatRight>
-    </FlexContainer>
+const Tabs: React.FC<{
+  state: DashboardState;
+  tabs: [Tab, string][];
+}> = ({ state, tabs }): JSX.Element => (
+  <div className="ledger-tabs" role="tablist">
+    {tabs.map(([tab, label]) => (
+      <button
+        key={tab}
+        role="tab"
+        aria-selected={state.tab === tab}
+        className={state.tab === tab ? 'mod-cta' : ''}
+        onClick={() => {
+          state.setTab(tab);
+          state.setSelectedAccounts([]);
+        }}
+      >
+        {label}
+        {tab === 'unreviewed' && state.unreviewed.length > 0 ? (
+          <span className="ledger-badge">{state.unreviewed.length}</span>
+        ) : null}
+      </button>
+    ))}
   </div>
 );
 
-const MobileDashboard: React.FC<{
-  settings: ISettings;
-  txCache: TransactionCache;
-}> = (props): JSX.Element => {
-  const [selectedTab, setSelectedTab] = React.useState('transactions');
-
-  /*
-  return (
-    <MobileTransactionList
-      currencySymbol={props.settings.currencySymbol}
+const SelectedAccounts: React.FC<{
+  state: DashboardState;
+  props: DashboardProps;
+  mobile: boolean;
+}> = ({ state, props, mobile }): JSX.Element => (
+  <>
+    <div className="ledger-selected-accounts">
+      <button onClick={() => state.setSelectedAccounts([])}>← Back</button>
+    </div>
+    <AccountChart
+      history={state.history}
       txCache={props.txCache}
+      selectedAccounts={state.selectedAccounts}
+      buckets={state.buckets}
+      interval={state.interval}
+      commodity={state.commodity}
+      commodities={state.commodities}
+      setCommodity={state.setCommodity}
+      startISO={state.startISO}
+      endISO={state.endISO}
+      isFlowAccount={state.isFlowAccount}
+      height={mobile ? '200px' : undefined}
     />
-  );
-  */
-  return <p>Dashboard not yet supported on mobile.</p>;
+    <TransactionTable
+      key={state.selectedAccounts.join('|')}
+      transactions={state.selectedTransactions}
+      txCache={props.txCache}
+      updater={props.updater}
+      mobile={mobile}
+    />
+  </>
+);
+
+const TabContent: React.FC<{
+  state: DashboardState;
+  props: DashboardProps;
+  mobile: boolean;
+}> = ({ state, props, mobile }): JSX.Element => {
+  switch (state.tab) {
+    case 'budgets':
+      return (
+        <BudgetTable
+          txCache={props.txCache}
+          startISO={state.startISO}
+          endISO={state.endISO}
+          onSelectAccount={(account) => state.setSelectedAccounts([account])}
+        />
+      );
+    case 'unreviewed':
+      return (
+        <TransactionTable
+          transactions={state.unreviewed}
+          txCache={props.txCache}
+          updater={props.updater}
+          mobile={mobile}
+          emptyMessage="No transactions are tagged :unreviewed:."
+        />
+      );
+    case 'accounts':
+      return (
+        <AccountsList
+          txCache={props.txCache}
+          settings={props.settings}
+          history={state.history}
+          commodity={state.commodity}
+          endISO={state.endISO}
+          selectedAccounts={state.selectedAccounts}
+          setSelectedAccounts={state.setSelectedAccounts}
+        />
+      );
+    case 'overview':
+      return (
+        <>
+          <NetWorthChart
+            history={state.history}
+            settings={props.settings}
+            txCache={props.txCache}
+            buckets={state.buckets}
+            interval={state.interval}
+            commodity={state.commodity}
+            commodities={state.commodities}
+            setCommodity={state.setCommodity}
+            endISO={state.endISO}
+            height={mobile ? '200px' : undefined}
+          />
+          <h2>Recent transactions</h2>
+          <TransactionTable
+            transactions={state.inRange}
+            txCache={props.txCache}
+            updater={props.updater}
+            mobile={mobile}
+            limit={10}
+          />
+        </>
+      );
+  }
 };
 
-const DesktopDashboard: React.FC<{
-  tutorialIndex: number;
-  setTutorialIndex: (index: number) => void;
-  settings: ISettings;
-  txCache: TransactionCache;
-  updater: LedgerModifier;
-}> = (props): JSX.Element => {
-  const dailyAccountBalanceMap = React.useMemo(() => {
-    console.time('daily-balance-map');
-
-    const changeMap = makeDailyAccountBalanceChangeMap(
-      props.txCache.transactions,
-    );
-    const balanceMap = makeDailyBalanceMap(
-      props.txCache.accounts,
-      changeMap,
-      props.txCache.firstDate,
-      window.moment(),
-    );
-
-    console.timeLog('daily-balance-map');
-    console.timeEnd('daily-balance-map');
-
-    return balanceMap;
-  }, [props.txCache]);
-
-  const [selectedAccounts, setSelectedAccounts] = React.useState<string[]>([]);
-  const [startDate, setStartDate] = React.useState(
-    window.moment().subtract(2, 'months'),
-  );
-  const [endDate, setEndDate] = React.useState(window.moment());
-  const [interval, setInterval] = React.useState<Interval>('week');
-
+const DesktopDashboard: React.FC<DashboardProps & { state: DashboardState }> = (
+  props,
+): JSX.Element => {
+  const { state } = props;
   return (
-    <>
-      <Header>
+    <Layout>
+      <div className="ledger-header">
+        <h2>Ledger</h2>
         <DateRangeSelector
-          startDate={startDate}
-          endDate={endDate}
-          setStartDate={setStartDate}
-          setEndDate={setEndDate}
-          interval={interval}
-          setInterval={setInterval}
+          preset={state.preset}
+          setPreset={state.setPreset}
+          startDate={state.startDate}
+          endDate={state.endDate}
+          setRange={state.setRange}
+          interval={state.interval}
+          setInterval={state.setInterval}
         />
         {props.tutorialIndex !== -1 ? (
-          <Tutorial
-            tutorialIndex={props.tutorialIndex}
-            setTutorialIndex={props.setTutorialIndex}
-          />
+          <Tutorial tutorialIndex={props.tutorialIndex} setTutorialIndex={props.setTutorialIndex} />
         ) : null}
-      </Header>
+      </div>
 
-      <FlexContainer>
-        <FlexSidebar>
+      <ParseErrors txCache={props.txCache} />
+
+      <div className="ledger-body">
+        <div className="ledger-sidebar">
           <AccountsList
             txCache={props.txCache}
             settings={props.settings}
-            selectedAccounts={selectedAccounts}
-            setSelectedAccounts={setSelectedAccounts}
+            history={state.history}
+            commodity={state.commodity}
+            endISO={state.endISO}
+            selectedAccounts={state.selectedAccounts}
+            setSelectedAccounts={state.setSelectedAccounts}
           />
-        </FlexSidebar>
-        <FlexMainContent>
-          {props.txCache.parsingErrors.length > 0 ? (
-            <ParseErrors txCache={props.txCache} />
-          ) : null}
-          {selectedAccounts.length === 0 ? (
-            <>
-              <NetWorthVisualization
-                dailyAccountBalanceMap={dailyAccountBalanceMap}
-                startDate={startDate}
-                endDate={endDate}
-                interval={interval}
-                settings={props.settings}
-              />
-              <RecentTransactionList
-                currencySymbol={props.settings.currencySymbol}
-                txCache={props.txCache}
-                updater={props.updater}
-                startDate={startDate}
-                endDate={endDate}
-              />
-            </>
+        </div>
+        <div className="ledger-main">
+          {state.selectedAccounts.length > 0 ? (
+            <SelectedAccounts state={state} props={props} mobile={false} />
           ) : (
             <>
-              <AccountVisualization
-                dailyAccountBalanceMap={dailyAccountBalanceMap}
-                allAccounts={props.txCache.accounts}
-                selectedAccounts={selectedAccounts}
-                startDate={startDate}
-                endDate={endDate}
-                interval={interval}
+              <Tabs
+                state={state}
+                tabs={[
+                  ['overview', 'Overview'],
+                  ['budgets', 'Budgets'],
+                  ['unreviewed', 'Unreviewed'],
+                ]}
               />
-              <TransactionList
-                currencySymbol={props.settings.currencySymbol}
-                txCache={props.txCache}
-                updater={props.updater}
-                selectedAccounts={selectedAccounts}
-                setSelectedAccount={(account: string) =>
-                  setSelectedAccounts([account])
-                }
-                startDate={startDate}
-                endDate={endDate}
-              />
+              <TabContent state={state} props={props} mobile={false} />
             </>
           )}
-        </FlexMainContent>
-      </FlexContainer>
-    </>
+        </div>
+      </div>
+    </Layout>
+  );
+};
+
+const MobileDashboard: React.FC<DashboardProps & { state: DashboardState }> = (
+  props,
+): JSX.Element => {
+  const { state } = props;
+  return (
+    <Layout className="ledger-mobile">
+      <div className="ledger-header">
+        <DateRangeSelector
+          compact
+          preset={state.preset}
+          setPreset={state.setPreset}
+          startDate={state.startDate}
+          endDate={state.endDate}
+          setRange={state.setRange}
+          interval={state.interval}
+          setInterval={state.setInterval}
+        />
+        <button className="mod-cta" onClick={() => props.updater.openExpenseModal('new')}>
+          Add transaction
+        </button>
+      </div>
+
+      <ParseErrors txCache={props.txCache} />
+
+      {state.selectedAccounts.length > 0 ? (
+        <SelectedAccounts state={state} props={props} mobile />
+      ) : (
+        <>
+          <Tabs
+            state={state}
+            tabs={[
+              ['overview', 'Overview'],
+              ['accounts', 'Accounts'],
+              ['budgets', 'Budgets'],
+              ['unreviewed', 'Unreviewed'],
+            ]}
+          />
+          <TabContent state={state} props={props} mobile />
+        </>
+      )}
+    </Layout>
   );
 };
 
@@ -202,8 +482,7 @@ const Tutorial: React.FC<{
 }> = (props): JSX.Element => {
   const steps: Step[] = [
     {
-      intro:
-        'Welcome to the Obsidian Ledger plugin. Let me show you around a bit!',
+      intro: 'Welcome to the Obsidian Ledger plugin. Let me show you around a bit!',
       tooltipClass: 'ledger-tutorial-tooltip',
     },
     {
@@ -223,7 +502,7 @@ const Tutorial: React.FC<{
     },
     {
       intro: 'Click here to edit your Ledger file as raw text.',
-      element: 'a[aria-label="Switch to Markdown View"]',
+      element: '.view-action[aria-label="Switch to Markdown View"]',
       tooltipClass: 'ledger-tutorial-tooltip',
     },
     {
@@ -231,26 +510,10 @@ const Tutorial: React.FC<{
         'There are more helpful tips in your Ledger file. Go take a look at it in raw text mode.',
       tooltipClass: 'ledger-tutorial-tooltip',
     },
-    {
-      intro: (
-        <p>
-          If you have any questions, please visit the{' '}
-          <a href="https://github.com/tgrosinger/ledger-obsidian/discussions">
-            Github Discussions Page
-          </a>
-          .
-        </p>
-      ),
-      tooltipClass: 'ledger-tutorial-tooltip',
-    },
   ];
 
   const onExit = (index: number): void => {
-    if (index + 1 === steps.length) {
-      props.setTutorialIndex(-1);
-    } else {
-      props.setTutorialIndex(index);
-    }
+    props.setTutorialIndex(index + 1 >= steps.length || index < 0 ? -1 : index);
   };
 
   return (
@@ -258,7 +521,8 @@ const Tutorial: React.FC<{
       enabled={true}
       steps={steps}
       onExit={onExit}
-      initialStep={props.tutorialIndex}
+      onComplete={() => props.setTutorialIndex(-1)}
+      initialStep={Math.min(props.tutorialIndex, steps.length - 1)}
     />
   );
 };
