@@ -1,1384 +1,354 @@
-import { ParseError } from '../src/error';
 import {
-  AliasWithBlock,
-  EnhancedTransaction,
-  FileBlock,
-  fillMissingAmount,
+  EnhancedExpenseLine,
+  getPostings,
   parse,
-  splitIntoBlocks,
-  TransactionWithBlock,
+  parsePostingLine,
 } from '../src/parser';
 import { settingsWithDefaults } from '../src/settings';
-import { assert } from 'console';
-import * as moment from 'moment';
-
-window.moment = moment;
-
-const emptyBlock: FileBlock = {
-  firstLine: -1,
-  lastLine: -1,
-  block: '',
-};
 
 const settings = settingsWithDefaults({});
 
-describe('splitIntoBlocks()', () => {
-  test('simple example', () => {
-    const input = ['line1', 'line2', 'line3'].join('\n');
-    const result = splitIntoBlocks(input);
-    expect(result).toHaveLength(1);
-    if (!result[0]) {
-      assert(false);
-      return; // Appease the type checker
-    }
-    expect(result[0].firstLine).toEqual(0);
-    expect(result[0].lastLine).toEqual(2);
-    expect(result[0].block).toEqual('line1\nline2\nline3');
-  });
-  test('when there is a trailing new line', () => {
-    const input = ['line1', 'line2', 'line3', ''].join('\n');
-    const result = splitIntoBlocks(input);
-    expect(result).toHaveLength(1);
-    if (!result[0]) {
-      assert(false);
-      return; // Appease the type checker
-    }
-    expect(result[0].firstLine).toEqual(0);
-    expect(result[0].lastLine).toEqual(2);
-    expect(result[0].block).toEqual('line1\nline2\nline3');
-  });
-  test('when there are multiple blocks', () => {
-    const input = ['line1', 'line2', 'line3', '', 'line4', 'line5'].join('\n');
-    const result = splitIntoBlocks(input);
-    expect(result).toHaveLength(2);
-    if (!result[0] || !result[1]) {
-      assert(false);
-      return; // Appease the type checker
-    }
-    expect(result[0].firstLine).toEqual(0);
-    expect(result[0].lastLine).toEqual(2);
-    expect(result[0].block).toEqual('line1\nline2\nline3');
-    expect(result[1].firstLine).toEqual(4);
-    expect(result[1].lastLine).toEqual(5);
-    expect(result[1].block).toEqual('line4\nline5');
-  });
-  test('when there are multiple blank lines between blocks', () => {
-    const input = ['line1', 'line2', 'line3', '', '', 'line4', 'line5'].join(
-      '\n',
+const postingsOf = (contents: string, index = 0): EnhancedExpenseLine[] => {
+  const cache = parse(contents, settings);
+  expect(cache.parsingErrors).toEqual([]);
+  return getPostings(cache.transactions[index]);
+};
+
+const amounts = (postings: EnhancedExpenseLine[]): [string, number, string][] =>
+  postings.map((p) => [p.account, p.amount, p.currency]);
+
+describe('parsePostingLine()', () => {
+  test('account with spaces, digits, hyphens and accents', () => {
+    const { posting } = parsePostingLine(
+      '    Assets:Loans:Causartt:18 Año-POS    $10,000.00',
+      3,
     );
-    const result = splitIntoBlocks(input);
-    expect(result).toHaveLength(2);
-    if (!result[0] || !result[1]) {
-      assert(false);
-      return; // Appease the type checker
-    }
-    expect(result[0].firstLine).toEqual(0);
-    expect(result[0].lastLine).toEqual(2);
-    expect(result[0].block).toEqual('line1\nline2\nline3');
-    expect(result[1].firstLine).toEqual(5);
-    expect(result[1].lastLine).toEqual(6);
-    expect(result[1].block).toEqual('line4\nline5');
+    expect(posting?.account).toEqual('Assets:Loans:Causartt:18 Año-POS');
+    expect(posting?.amount).toEqual(10000);
+    expect(posting?.currency).toEqual('$');
+    expect(posting?.line).toEqual(3);
   });
-  test('when there is whitespace on the blank line - 1', () => {
-    const input = ['line1', 'line2', 'line3', '\t', 'line4', 'line5'].join(
-      '\n',
-    );
-    const result = splitIntoBlocks(input);
-    expect(result).toHaveLength(2);
-    if (!result[0] || !result[1]) {
-      assert(false);
-      return; // Appease the type checker
-    }
-    expect(result[0].firstLine).toEqual(0);
-    expect(result[0].lastLine).toEqual(2);
-    expect(result[0].block).toEqual('line1\nline2\nline3');
-    expect(result[1].firstLine).toEqual(4);
-    expect(result[1].lastLine).toEqual(5);
-    expect(result[1].block).toEqual('line4\nline5');
+
+  test('tab separator, status and comment', () => {
+    const { posting } = parsePostingLine('\t* Expenses:Food\t-$5.25 ; lunch', 0);
+    expect(posting).toMatchObject({
+      reconcile: '*',
+      account: 'Expenses:Food',
+      amount: -5.25,
+      currency: '$',
+      comment: 'lunch',
+    });
   });
-  test('when there is whitespace on the blank line - 2', () => {
-    const input = ['line1', 'line2', 'line3', '    ', 'line4', 'line5'].join(
-      '\n',
+
+  test.each([
+    ['$-180', -180, '$'],
+    ['-$180.5', -180.5, '$'],
+    ['$ 12', 12, '$'],
+    ['2155.10 USD', 2155.1, 'USD'],
+    ['-0.00719462 SOL', -0.00719462, 'SOL'],
+    ['30 "Gel Beta Fuel"', 30, 'Gel Beta Fuel'],
+    ['EUR 4.00', 4, 'EUR'],
+    ['100', 100, ''],
+  ])('amount %s', (text, quantity, commodity) => {
+    const { posting, error } = parsePostingLine(`  Assets:X  ${text}`, 0);
+    expect(error).toBeUndefined();
+    expect(posting?.amount).toBeCloseTo(quantity, 10);
+    expect(posting?.currency).toEqual(commodity);
+  });
+
+  test('prices, lots and assertions', () => {
+    const { posting } = parsePostingLine(
+      '  Assets:Brokerage    -2.90 XBI {89.39 USD} [2024/06/03] @@ 272.06 USD = 0 XBI',
+      0,
     );
-    const result = splitIntoBlocks(input);
-    expect(result).toHaveLength(2);
-    if (!result[0] || !result[1]) {
-      assert(false);
-      return; // Appease the type checker
-    }
-    expect(result[0].firstLine).toEqual(0);
-    expect(result[0].lastLine).toEqual(2);
-    expect(result[0].block).toEqual('line1\nline2\nline3');
-    expect(result[1].firstLine).toEqual(4);
-    expect(result[1].lastLine).toEqual(5);
-    expect(result[1].block).toEqual('line4\nline5');
+    expect(posting).toMatchObject({
+      amount: -2.9,
+      currency: 'XBI',
+      price: { type: '@@', amount: { commodity: 'USD', quantity: 272.06 } },
+      lotCost: { type: '@', amount: { commodity: 'USD', quantity: 89.39 } },
+      assertion: { commodity: 'XBI', quantity: 0 },
+      annotations: '{89.39 USD} [2024/06/03] @@ 272.06 USD = 0 XBI',
+    });
+  });
+
+  test('balance assignment without a space', () => {
+    const { posting } = parsePostingLine('    Assets:Checking    =$8816.51', 0);
+    expect(posting?.hasWrittenAmount).toBe(false);
+    expect(posting?.assertion).toEqual({ commodity: '$', quantity: 8816.51 });
+  });
+
+  test('virtual accounts', () => {
+    expect(parsePostingLine('  (Budget:Boston)  -34.73 USD', 0).posting)
+      .toMatchObject({ account: 'Budget:Boston', virtual: '(' });
+    expect(parsePostingLine('  [Savings:Goal]  $5', 0).posting).toMatchObject({
+      account: 'Savings:Goal',
+      virtual: '[',
+    });
+  });
+
+  test('unsupported text is an error', () => {
+    expect(parsePostingLine('  Assets:X  ($10 * 2)', 0).error).toMatch(
+      /Expression/,
+    );
+    expect(parsePostingLine('  Assets:X  $10 garbage', 0).error).toMatch(
+      /Unrecognized/,
+    );
   });
 });
 
-describe('parsing a ledger file', () => {
-  describe('transactions are populated correctly', () => {
-    test('when the file is empty', () => {
-      const contents = '';
-      const txCache = parse(contents, settings);
-      expect(txCache.transactions).toHaveLength(0);
-    });
-    test('when the final expense line has no amount', () => {
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      b:CreditUnion`;
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 2,
-          block: contents,
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'e:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -20,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.firstDate).toEqual(window.moment('2021/04/20'));
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-    });
-    test('when the final expense has an amount', () => {
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      b:CreditUnion       $-20.00`;
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 2,
-          block: contents,
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'e:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -20,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-    });
-    test('when the sign is in front of the currency', () => {
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money
-      b:CreditUnion       -$20.00`;
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 2,
-          block: contents,
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'e:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -20,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-    });
-    test('when the sign is in front of the currency as well as in the amount', () => {
-      // ledger-cli combines the signs in front of the currency and in front of the amount to make it positive again
-      // (result for `-$-20.00` is positive, e.g. 20$).
-      // We would have previously parsed this as a negative amount (account name would be 'b:CreditUnion       -' though).
-      // For now lets just not allow double signs to surface this inconsistency hoping that this is an edge case.
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money
-      b:CreditUnion       -$-20.00`;
-      const txCache = parse(contents, settings);
-      expect(txCache.transactions).toHaveLength(0);
-    });
-    test('when the middle expense has no amount', () => {
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      e:Food:Grocery
-      b:CreditUnion       $-30.00`;
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 3,
-          block: contents,
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'e:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'e:Food:Grocery',
-              dealiasedAccount: 'e:Food:Grocery',
-              amount: 10,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -30,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-    });
-    test('when there are not enough amounts', () => {
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money
-      e:Food:Grocery
-      b:CreditUnion       $-30.00`;
-      const txCache = parse(contents, settings);
-      expect(txCache.parsingErrors).toHaveLength(1);
-      expect(txCache.transactions).toHaveLength(0);
-    });
-    test('when there are multiple expense lines', () => {
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      e:Household Goods   $5.00
-      b:CreditUnion       $-25.00`;
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 3,
-          block: contents,
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'e:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'e:Household Goods',
-              dealiasedAccount: 'e:Household Goods',
-              amount: 5,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -25,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-    });
-    test('when there are multiple transactions', () => {
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      b:CreditUnion       $-20.00
-      
-2021/04/21   Food Co-op
-      e:Food:Groceries    $45.00
-      b:CreditUnion       $-45.00`;
-      const txCache = parse(contents, settings);
-      const expected1: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 2,
-          block: contents.split('\n').slice(0, 3).join('\n'),
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'e:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -20,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      const expected2: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 4,
-          lastLine: 6,
-          block: contents.split('\n').slice(4).join('\n'),
-        },
-        value: {
-          date: '2021/04/21',
-          payee: 'Food Co-op',
-          expenselines: [
-            {
-              account: 'e:Food:Groceries',
-              dealiasedAccount: 'e:Food:Groceries',
-              amount: 45,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -45,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.parsingErrors).toEqual([]);
-      expect(txCache.transactions).toHaveLength(2);
-      expect(txCache.transactions[0]).toEqual(expected1);
-      expect(txCache.transactions[1]).toEqual(expected2);
-    });
-    test('reconciled lines remove special characters', () => {
-      const contents = `2021/04/20 Obsidian
-    !  e:Spending Money    $20.00
-    * e:Household Goods   $5.00
-      b:CreditUnion       $-25.00`;
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 3,
-          block: contents,
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'e:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '!',
-            },
-            {
-              account: 'e:Household Goods',
-              dealiasedAccount: 'e:Household Goods',
-              amount: 5,
-              currency: '$',
-              reconcile: '*',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -25,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-    });
-    test('Comments are preserved', () => {
-      const contents = `2021/04/20 Obsidian ; testing
-      e:Spending Money    $20.00 ; a comment
-      e:Household Goods   $5.00
-      b:CreditUnion       $-25.00`;
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 3,
-          block: contents,
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          comment: 'testing',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'e:Spending Money',
-              amount: 20,
-              currency: '$',
-              comment: 'a comment',
-              reconcile: '',
-            },
-            {
-              account: 'e:Household Goods',
-              dealiasedAccount: 'e:Household Goods',
-              amount: 5,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -25,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-    });
-    test('Non-Ascii characters are supported', () => {
-      const contents = `2021/01/01 халтура
-      счет:наличка:черныйКошель  Р2000.00
-      приработок:урлапов`;
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 2,
-          block: contents,
-        },
-        value: {
-          date: '2021/01/01',
-          payee: 'халтура',
-          expenselines: [
-            {
-              account: 'счет:наличка:черныйКошель',
-              dealiasedAccount: 'счет:наличка:черныйКошель',
-              amount: 2000,
-              currency: 'Р',
-              reconcile: '',
-            },
-            {
-              account: 'приработок:урлапов',
-              dealiasedAccount: 'приработок:урлапов',
-              amount: -2000,
-              currency: 'Р',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.parsingErrors).toEqual([]);
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-    });
-    test('Stars in payee are supported', () => {
-      const contents = `2021/04/21	CardNr.*******1234
-	    e:Spending Money
-	    b:CreditUnion			-$20.00`;
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 2,
-          block: contents,
-        },
-        value: {
-          date: '2021/04/21',
-          payee: 'CardNr.*******1234',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'e:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -20,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-    });
-    test('A parsing error tags the result accordingly', () => {
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      b:CreditUnion       $-20.00
-
-      An unexpected line
-      
-2021/04/21   Food Co-op
-      e:Food:Groceries    $45.00
-      b:CreditUnion       $-45.00`;
-      const txCache = parse(contents, settings);
-      const expected1: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 2,
-          block: contents.split('\n').slice(0, 3).join('\n'),
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'e:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -20,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      const expected2: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 1,
-        block: {
-          firstLine: 6,
-          lastLine: 8,
-          block: contents.split('\n').slice(6).join('\n'),
-        },
-        value: {
-          date: '2021/04/21',
-          payee: 'Food Co-op',
-          expenselines: [
-            {
-              account: 'e:Food:Groceries',
-              dealiasedAccount: 'e:Food:Groceries',
-              amount: 45,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -45,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      expect(txCache.parsingErrors.length).toEqual(1);
-      if (!txCache.parsingErrors[0]) {
-        assert(false);
-        return; // Appease the type checker
-      }
-      expect(txCache.parsingErrors[0].message).toEqual(
-        'Failed to parse block in ledger file',
-      );
-      expect(txCache.parsingErrors[0]).toHaveProperty('error');
-      expect(txCache.parsingErrors[0]).toHaveProperty('block');
-      expect((txCache.parsingErrors[0] as ParseError).block).toEqual({
-        block: '      An unexpected line',
-        firstLine: 4,
-        lastLine: 4,
-      });
-      expect(txCache.transactions).toHaveLength(2);
-      expect(txCache.transactions[0]).toEqual(expected1);
-      expect(txCache.transactions[1]).toEqual(expected2);
-    });
+describe('parse()', () => {
+  test('empty file', () => {
+    const cache = parse('', settings);
+    expect(cache.transactions).toHaveLength(0);
+    expect(cache.parsingErrors).toHaveLength(0);
   });
-  describe('payees are populated correctly', () => {
-    test('duplicates are removed', () => {
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      b:CreditUnion       $-20.00
-      
-2021/04/21   Food Co-op
-      e:Food:Groceries    $45.00
-      b:CreditUnion       $-45.00
 
-2021/04/21   Food Co-op
-      e:Food:Groceries    $25.00
-      b:CreditUnion       $-25.00`;
-      const txCache = parse(contents, settings);
-      expect(txCache.payees).toHaveLength(2);
-      expect(txCache.payees[0]).toEqual('Food Co-op');
-      expect(txCache.payees[1]).toEqual('Obsidian');
+  test('transaction header fields and line numbers', () => {
+    const contents = [
+      '; comment',
+      '',
+      '2024/11/29=2024/12/01 * (Budget:Boston) Star Market! ; note',
+      '    ; city: boston',
+      '    Expenses:Food:Groceries   34.73 USD',
+      '    (Budget:Boston)    -34.73 USD',
+      '    Assets:Bank of America',
+    ].join('\n');
+    const cache = parse(contents, settings);
+    expect(cache.parsingErrors).toEqual([]);
+    const tx = cache.transactions[0];
+    expect(tx.value).toMatchObject({
+      date: '2024/11/29',
+      dateISO: '2024-11-29',
+      auxDate: '2024/12/01',
+      status: '*',
+      code: 'Budget:Boston',
+      payee: 'Star Market!',
+      comment: 'note',
     });
-  });
-  describe('accounts are populated correctly', () => {
-    test('duplicates are removed', () => {
-      const contents = `2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      b:CreditUnion       $-20.00
-      
-2021/04/21   Food Co-op
-      e:Food:Groceries    $45.00
-      b:CreditUnion       $-45.00
-
-2021/04/21   Food Co-op
-      e:Food:Groceries    $25.00
-      b:CreditUnion       $-25.00`;
-      const txCache = parse(contents, settings);
-      expect(txCache.accounts).toHaveLength(3);
-      expect(txCache.accounts[0]).toEqual('b:CreditUnion');
-      expect(txCache.accounts[1]).toEqual('e:Food:Groceries');
-      expect(txCache.accounts[2]).toEqual('e:Spending Money');
+    expect(tx.block).toEqual({
+      firstLine: 2,
+      lastLine: 6,
+      block: contents.split('\n').slice(2).join('\n'),
     });
-  });
-  describe('aliases are parsed and used correctly', () => {
-    // TODO: This is testing both aliases and accounts. Split into multiple tests.
-    test('accounts are expanded using aliases', () => {
-      const contents = `alias e=Expenses
-alias c=Liabilities:Credit
-alias b=Assets:Banking
-
-2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      b:CreditUnion       $-20.00
-      
-2021/04/21   Food Co-op
-      e:Food:Groceries    $45.00
-      c:Chase             $-45.00
-
-2021/04/21   Food Co-op
-      e:Food:Groceries    $25.00
-      b:CreditUnion       $-25.00`;
-
-      const customSettings = settingsWithDefaults({
-        assetAccountsPrefix: 'Assets',
-        expenseAccountsPrefix: 'Expenses',
-        incomeAccountsPrefix: 'Income',
-        liabilityAccountsPrefix: 'Liabilities',
-      });
-
-      const txCache = parse(contents, customSettings);
-      expect(txCache.accounts).toHaveLength(4);
-      expect(txCache.assetAccounts).toEqual(['Assets:Banking:CreditUnion']);
-      expect(txCache.expenseAccounts).toEqual([
-        'Expenses:Food:Groceries',
-        'Expenses:Spending Money',
-      ]);
-      expect(txCache.liabilityAccounts).toEqual(['Liabilities:Credit:Chase']);
-      expect(txCache.incomeAccounts).toEqual([]);
-    });
-    test('an account that is the same as the alias', () => {
-      const contents = `alias e=Expenses
-alias b=Assets:Banking
-      
-2021/04/20 Obsidian
-      e                   $20.00
-      b:CreditUnion       $-20.00`;
-
-      const customSettings = settingsWithDefaults({
-        assetAccountsPrefix: 'Assets',
-        expenseAccountsPrefix: 'Expenses',
-        incomeAccountsPrefix: 'Income',
-        liabilityAccountsPrefix: 'Liabilities',
-      });
-
-      const txCache = parse(contents, customSettings);
-      expect(txCache.accounts).toEqual([
-        'Assets:Banking:CreditUnion',
-        'Expenses',
-      ]);
-      expect(txCache.assetAccounts).toEqual(['Assets:Banking:CreditUnion']);
-      expect(txCache.expenseAccounts).toEqual(['Expenses']);
-      expect(txCache.liabilityAccounts).toEqual([]);
-      expect(txCache.incomeAccounts).toEqual([]);
-    });
-  });
-  describe('multiple elements in a block are parsed correctly', () => {
-    // TODO: When there is better preservation of aliases and comments in the tx
-    // cache, write more tests to make sure their line numbers are preserved.
-    test('when there are multiple aliases and a transaction', () => {
-      const contents = `alias e=Expenses
-alias b=Banking
-2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      b:CreditUnion`;
-      const contentLines = contents.split('\n');
-      if (!contentLines[0] || !contentLines[1]) {
-        assert(false);
-        return; // Appease the type checker
-      }
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 3,
-        block: {
-          firstLine: 2,
-          lastLine: 4,
-          block: contents.split('\n').splice(2).join('\n'),
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'Expenses:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'Banking:CreditUnion',
-              amount: -20,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      const expectedAlias1: AliasWithBlock = {
-        type: 'alias',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 0,
-          block: contentLines[0],
-        },
-        value: {
-          left: 'e',
-          right: 'Expenses',
-        },
-      };
-      const expectedAlias2: AliasWithBlock = {
-        type: 'alias',
-        blockLine: 2,
-        block: {
-          firstLine: 1,
-          lastLine: 1,
-          block: contentLines[1],
-        },
-        value: {
-          left: 'b',
-          right: 'Banking',
-        },
-      };
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-      expect(txCache.rawComments).toHaveLength(0);
-      expect(txCache.rawAliases).toHaveLength(2);
-      expect(txCache.rawAliases[0]).toEqual(expectedAlias1);
-      expect(txCache.rawAliases[1]).toEqual(expectedAlias2);
-    });
-    test('when there is an alias and a transaction', () => {
-      const contents = `alias e=Expenses
-2021/04/20 Obsidian
-      e:Spending Money    $20.00
-      b:CreditUnion`;
-      const contentLines = contents.split('\n');
-      if (!contentLines[0]) {
-        assert(false);
-        return; // Appease the type checker
-      }
-      const txCache = parse(contents, settings);
-      const expected: EnhancedTransaction = {
-        type: 'tx',
-        blockLine: 2,
-        block: {
-          firstLine: 1,
-          lastLine: 3,
-          block: contents.split('\n').slice(1).join('\n'),
-        },
-        value: {
-          date: '2021/04/20',
-          payee: 'Obsidian',
-          expenselines: [
-            {
-              account: 'e:Spending Money',
-              dealiasedAccount: 'Expenses:Spending Money',
-              amount: 20,
-              currency: '$',
-              reconcile: '',
-            },
-            {
-              account: 'b:CreditUnion',
-              dealiasedAccount: 'b:CreditUnion',
-              amount: -20,
-              currency: '$',
-              reconcile: '',
-            },
-          ],
-          currencyType: '$',
-        },
-      };
-      const expectedAlias: AliasWithBlock = {
-        type: 'alias',
-        blockLine: 1,
-        block: {
-          firstLine: 0,
-          lastLine: 0,
-          block: contentLines[0],
-        },
-        value: {
-          left: 'e',
-          right: 'Expenses',
-        },
-      };
-      expect(txCache.transactions).toHaveLength(1);
-      expect(txCache.transactions[0]).toEqual(expected);
-      expect(txCache.rawComments).toHaveLength(0);
-      expect(txCache.rawAliases).toHaveLength(1);
-      expect(txCache.rawAliases[0]).toEqual(expectedAlias);
+    expect(tx.value.expenselines[0]).toEqual({
+      line: 3,
+      raw: '    ; city: boston',
+      comment: 'city: boston',
     });
   });
 
-  test('complicated example transaction', () => {
-    const contents = `alias e=Expenses
-alias c=Credit
-2019/09/16 Costco
-    ;Needs more splits
-    e:Food:Grocery                              $236.58
-    e:Spending Money                         $30.00  ;  Coat
-  * c:Citi                  $-266.58`;
-    const txCache = parse(contents, settings);
-    const expected: EnhancedTransaction = {
-      type: 'tx',
-      blockLine: 3,
-      block: {
-        firstLine: 2,
-        lastLine: 6,
-        block: contents.split('\n').slice(2).join('\n'),
-      },
-      value: {
-        date: '2019/09/16',
-        payee: 'Costco',
-        expenselines: [
-          {
-            comment: 'Needs more splits',
-          },
-          {
-            account: 'e:Food:Grocery',
-            dealiasedAccount: 'Expenses:Food:Grocery',
-            amount: 236.58,
-            reconcile: '',
-            currency: '$',
-          },
-          {
-            account: 'e:Spending Money',
-            dealiasedAccount: 'Expenses:Spending Money',
-            amount: 30,
-            reconcile: '',
-            currency: '$',
-            comment: 'Coat',
-          },
-          {
-            account: 'c:Citi',
-            dealiasedAccount: 'Credit:Citi',
-            amount: -266.58,
-            reconcile: '*',
-            currency: '$',
-          },
-        ],
-        currencyType: '$',
-      },
-    };
-
-    expect(txCache.parsingErrors).toHaveLength(0);
-    expect(txCache.transactions).toHaveLength(1);
-    expect(txCache.transactions[0]).toEqual(expected);
-    expect(txCache.payees).toEqual(['Costco']);
-    expect(txCache.accounts).toHaveLength(3);
-    expect(txCache.accounts[0]).toEqual('Credit:Citi');
-    expect(txCache.accounts[1]).toEqual('Expenses:Food:Grocery');
-    expect(txCache.accounts[2]).toEqual('Expenses:Spending Money');
+  test('one-character payee and dash dates', () => {
+    const cache = parse('2023-09-07 X\n  a:b  $1\n  c:d', settings);
+    expect(cache.transactions[0].value.payee).toEqual('X');
+    expect(cache.transactions[0].value.dateISO).toEqual('2023-09-07');
   });
-});
 
-describe('fillMissingAmount()', () => {
-  describe('When there is a comment line', () => {
-    test('and the comment is the first line', () => {
-      const input: TransactionWithBlock = {
-        type: 'tx',
-        blockLine: -1,
-        block: emptyBlock,
-        value: {
-          date: '2021/12/04',
-          payee: 'Testing',
-          expenselines: [
-            {
-              comment: 'This is a comment',
-            },
-            {
-              account: 'account1',
-              amount: 10.5,
-              reconcile: '',
-            },
-            {
-              account: 'account3',
-              amount: -10.5,
-              reconcile: '',
-            },
-          ],
-        },
-      };
-      const result = fillMissingAmount(input);
-      result.mapErr(fail);
-      expect(input.value.expenselines).toEqual([
-        {
-          comment: 'This is a comment',
-        },
-        {
-          account: 'account1',
-          amount: 10.5,
-          reconcile: '',
-        },
-        {
-          account: 'account3',
-          amount: -10.5,
-          reconcile: '',
-        },
-      ]);
-    });
-    test('and there is a missing amount', () => {
-      const input: TransactionWithBlock = {
-        type: 'tx',
-        blockLine: -1,
-        block: emptyBlock,
-        value: {
-          date: '2021/12/04',
-          payee: 'Testing',
-          expenselines: [
-            {
-              account: 'account1',
-              reconcile: '',
-            },
-            {
-              comment: 'This is a comment',
-            },
-            {
-              account: 'account3',
-              amount: -10.5,
-              reconcile: '',
-            },
-          ],
-        },
-      };
-      const result = fillMissingAmount(input);
-      result.mapErr(fail);
-      expect(input.value.expenselines).toEqual([
-        {
-          account: 'account1',
-          amount: 10.5,
-          reconcile: '',
-        },
-        {
-          comment: 'This is a comment',
-        },
-        {
-          account: 'account3',
-          amount: -10.5,
-          reconcile: '',
-        },
-      ]);
-    });
-    test('and there are no missing amounts', () => {
-      const input: TransactionWithBlock = {
-        type: 'tx',
-        blockLine: -1,
-        block: emptyBlock,
-        value: {
-          date: '2021/12/04',
-          payee: 'Testing',
-          expenselines: [
-            {
-              account: 'account1',
-              amount: 10.5,
-              reconcile: '',
-            },
-            {
-              comment: 'This is a comment',
-            },
-            {
-              account: 'account3',
-              amount: -10.5,
-              reconcile: '',
-            },
-          ],
-        },
-      };
-      const result = fillMissingAmount(input);
-      result.mapErr(fail);
-      expect(input.value.expenselines).toEqual([
-        {
-          account: 'account1',
-          amount: 10.5,
-          reconcile: '',
-        },
-        {
-          comment: 'This is a comment',
-        },
-        {
-          account: 'account3',
-          amount: -10.5,
-          reconcile: '',
-        },
-      ]);
-    });
-    test('and there is an amount that is zero', () => {
-      const input: TransactionWithBlock = {
-        type: 'tx',
-        blockLine: -1,
-        block: emptyBlock,
-        value: {
-          date: '2021/12/04',
-          payee: 'Testing',
-          expenselines: [
-            {
-              account: 'account1',
-              amount: 10.5,
-              reconcile: '',
-            },
-            {
-              account: 'account2',
-              reconcile: '',
-              amount: 0,
-            },
-            {
-              account: 'account3',
-              reconcile: '',
-            },
-          ],
-        },
-      };
-      const result = fillMissingAmount(input);
-      result.mapErr(fail);
-      expect(input.value.expenselines).toEqual([
-        {
-          account: 'account1',
-          amount: 10.5,
-          reconcile: '',
-        },
-        {
-          account: 'account2',
-          reconcile: '',
-          amount: 0,
-        },
-        {
-          account: 'account3',
-          reconcile: '',
-          amount: -10.5,
-        },
-      ]);
-    });
+  test('transactions without blank lines between them', () => {
+    const cache = parse(
+      '2024/01/01 A\n  e:x  $1\n  a:y\n2024/01/02 B\n  e:x  $2\n  a:y',
+      settings,
+    );
+    expect(cache.parsingErrors).toEqual([]);
+    expect(cache.transactions.map((t) => t.value.payee)).toEqual(['A', 'B']);
+    expect(cache.transactions[1].block.firstLine).toEqual(3);
   });
-  test('and there is more than one missing amount', () => {
-    const input: TransactionWithBlock = {
-      type: 'tx',
-      blockLine: -1,
-      block: emptyBlock,
-      value: {
-        date: '2021/12/04',
-        payee: 'Testing',
-        expenselines: [
-          {
-            account: 'account1',
-            amount: 10.5,
-            reconcile: '',
-          },
-          {
-            account: 'account2',
-            reconcile: '',
-          },
-          {
-            account: 'account3',
-            reconcile: '',
-          },
-        ],
-      },
-    };
-    const result = fillMissingAmount(input);
-    result.match(fail, (e) => {
-      expect(e.message).toEqual(
-        'Transaction has multiple expense lines without an amount. At most one is allowed.',
-      );
-      expect(e.transaction).toEqual(input);
-    });
-    expect(input.value.expenselines).toEqual([
-      {
-        account: 'account1',
-        amount: 10.5,
-        reconcile: '',
-      },
-      {
-        account: 'account2',
-        reconcile: '',
-      },
-      {
-        account: 'account3',
-        reconcile: '',
-      },
+
+  test('missing amount ignores (virtual) postings', () => {
+    const postings = postingsOf(`2024/11/29 (Budget:Boston) Star Market
+    Expenses:Food:Groceries   34.73 USD
+    (Budget:Boston)    -34.73 USD
+    Assets:Bank of America`);
+    expect(amounts(postings)).toEqual([
+      ['Expenses:Food:Groceries', 34.73, 'USD'],
+      ['Budget:Boston', -34.73, 'USD'],
+      ['Assets:Bank of America', -34.73, 'USD'],
+    ]);
+    expect(postings[2].hasWrittenAmount).toBe(false);
+  });
+
+  test('[balanced virtual] postings balance among themselves', () => {
+    const postings = postingsOf(`2024/01/01 Save
+    Expenses:Food   $10
+    Assets:Cash
+    [Savings:Goal]   $5
+    [Assets:Cash]`);
+    expect(amounts(postings).map((a) => a[1])).toEqual([10, -10, 5, -5]);
+  });
+
+  test('missing amount is inferred per commodity using prices', () => {
+    const postings = postingsOf(`2023/09/07 Starting Balances
+    c:Safe    2310 USD @ $17.60
+    c:Blue Bag    4.00 EUR
+    StartingBalance`);
+    const inferred = postings[2];
+    expect(inferred.amounts).toEqual([
+      { commodity: '$', quantity: expect.closeTo(-40656, 6) },
+      { commodity: 'EUR', quantity: -4 },
     ]);
   });
-  describe('When there are only two expense lines', () => {
-    test('and the first line is missing', () => {
-      const input: TransactionWithBlock = {
-        type: 'tx',
-        blockLine: -1,
-        block: emptyBlock,
-        value: {
-          date: '2021/12/04',
-          payee: 'Testing',
-          expenselines: [
-            {
-              account: 'account1',
-              reconcile: '',
-            },
-            {
-              account: 'account3',
-              amount: -10.5,
-              reconcile: '',
-            },
-          ],
-        },
-      };
-      const result = fillMissingAmount(input);
-      result.mapErr(fail);
-      expect(input.value.expenselines).toEqual([
-        {
-          account: 'account1',
-          reconcile: '',
-          amount: 10.5,
-        },
-        {
-          account: 'account3',
-          amount: -10.5,
-          reconcile: '',
-        },
-      ]);
-    });
-    test('and the second line is missing', () => {
-      const input: TransactionWithBlock = {
-        type: 'tx',
-        blockLine: -1,
-        block: emptyBlock,
-        value: {
-          date: '2021/12/04',
-          payee: 'Testing',
-          expenselines: [
-            {
-              account: 'account1',
-              amount: 10.5,
-              reconcile: '',
-            },
-            {
-              account: 'account3',
-              reconcile: '',
-            },
-          ],
-        },
-      };
-      const result = fillMissingAmount(input);
-      result.mapErr(fail);
-      expect(input.value.expenselines).toEqual([
-        {
-          account: 'account1',
-          amount: 10.5,
-          reconcile: '',
-        },
-        {
-          account: 'account3',
-          reconcile: '',
-          amount: -10.5,
-        },
-      ]);
-    });
+
+  test('lot cost takes precedence over the sale price', () => {
+    const postings = postingsOf(`2024/06/05 XBI sale
+    Assets:Cash    $4771.61 @@ 272.06 USD
+    Assets:USA    -2.90 XBI {89.3931034483 USD} [2024/06/03] @@ 272.06 USD
+    Income:Capital Gains`);
+    expect(postings[2].amount).toBeCloseTo(-12.82, 2);
+    expect(postings[2].currency).toEqual('USD');
   });
-  describe('When there are three expense lines', () => {
-    test('and the last line is missing', () => {
-      const input: TransactionWithBlock = {
-        type: 'tx',
-        blockLine: -1,
-        block: emptyBlock,
-        value: {
-          date: '2021/12/04',
-          payee: 'Testing',
-          expenselines: [
-            {
-              account: 'account1',
-              reconcile: '',
-              amount: 10.5,
-            },
-            {
-              account: 'account1',
-              amount: 5,
-              reconcile: '',
-            },
-            {
-              account: 'account3',
-              reconcile: '',
-            },
-          ],
-        },
-      };
-      const result = fillMissingAmount(input);
-      result.mapErr(fail);
-      expect(input.value.expenselines).toEqual([
-        {
-          account: 'account1',
-          reconcile: '',
-          amount: 10.5,
-        },
-        {
-          account: 'account1',
-          amount: 5,
-          reconcile: '',
-        },
-        {
-          account: 'account3',
-          reconcile: '',
-          amount: -15.5,
-        },
-      ]);
+
+  test('balance assignments and assertions', () => {
+    const cache = parse(
+      `2024/01/01 Open
+    Assets:Checking    $100
+    Equity
+
+2024/01/02 Groceries
+    Expenses:Food
+    Assets:Checking    = $70
+
+2024/01/03 Coffee
+    Expenses:Food    $5
+    Assets:Checking    -$5 = $65`,
+      settings,
+    );
+    expect(cache.parsingErrors).toEqual([]);
+    const groceries = getPostings(cache.transactions[1]);
+    expect(groceries[1].amount).toEqual(-30);
+    expect(groceries[0].amount).toEqual(30);
+  });
+
+  test('failed balance assertion is reported', () => {
+    const cache = parse(
+      '2024/01/01 A\n  Assets:X  $10 = $11\n  Equity',
+      settings,
+    );
+    expect(cache.parsingErrors[0].message).toMatch(/Balance assertion failed/);
+  });
+
+  test('unbalanced transaction is reported', () => {
+    const cache = parse('2024/01/01 A\n  e:x  $10\n  a:y  -$9', settings);
+    expect(cache.parsingErrors[0].message).toMatch(/does not balance/);
+  });
+
+  test('half-cent rounding is tolerated like ledger-cli', () => {
+    const cache = parse(
+      `2025/03/31 TSLA buy
+    Expenses:Commission    1.00 USD
+    Assets:IB    0.9 TSLA @ 258.25 USD
+    Assets:IB    -233.42 USD`,
+      settings,
+    );
+    expect(cache.parsingErrors).toEqual([]);
+  });
+
+  test('multiple postings without amount', () => {
+    const cache = parse('2024/01/01 A\n  e:x  $10\n  a:y\n  a:z', settings);
+    expect(cache.transactions).toHaveLength(0);
+    expect(cache.parsingErrors[0].message).toMatch(/multiple postings/);
+  });
+
+  test('directives, periodic transactions and comment blocks', () => {
+    const cache = parse(
+      `alias e=Expenses
+account Assets:Checking
+    note Main account
+commodity $
+P 2024/01/01 USD $17.50
+payee Oxxo
+~ Monthly from 2023/09/19
+    Expenses:Spotify    $69.00
+    Assets:Checking
+= /Food/
+    (Budget)  -1
+comment
+this is ignored
+end comment
+
+2024/01/01 Oxxo
+    e:Food    $10
+    Assets:Checking`,
+      settings,
+    );
+    expect(cache.parsingErrors).toEqual([]);
+    expect(cache.transactions).toHaveLength(1);
+    expect(cache.accounts).toEqual(['Assets:Checking', 'Expenses:Food']);
+    expect(cache.prices).toEqual([
+      {
+        dateISO: '2024-01-01',
+        commodity: 'USD',
+        price: { commodity: '$', quantity: 17.5 },
+      },
+    ]);
+    expect(getPostings(cache.transactions[0])[0].dealiasedAccount).toEqual(
+      'Expenses:Food',
+    );
+  });
+
+  test('unrecognized lines and include are reported', () => {
+    const cache = parse('include other.ledger\nfoo bar', settings);
+    expect(cache.parsingErrors.map((e) => e.message)).toEqual([
+      expect.stringMatching(/include/),
+      'Unrecognized line',
+    ]);
+  });
+
+  test('payees and accounts are ordered by recency and de-duplicated', () => {
+    const cache = parse(
+      `2024/01/01 OXXO
+    Expenses:Food    $1
+    Assets:Cash
+
+2024/03/01 Uber
+    Expenses:Transport    $1
+    Assets:Bank
+
+2024/02/01 Oxxo
+    Expenses:Food    $1
+    Assets:Cash`,
+      settings,
+    );
+    expect(cache.payees).toEqual(['Uber', 'Oxxo']);
+    expect(cache.accountsByUsage.slice(0, 2)).toEqual([
+      'Expenses:Transport',
+      'Assets:Bank',
+    ]);
+  });
+
+  test('account types use prefix boundaries and exclude virtual-only accounts', () => {
+    const cache = parse(
+      `2024/01/01 A
+    AssetsFoo:X    $1
+    Assets:Cash    $1
+    (Assets:Budget)    $1
+    Income:Salary`,
+      settings,
+    );
+    expect(cache.assetAccounts).toEqual(['Assets:Cash']);
+    expect(cache.incomeAccounts).toEqual(['Income:Salary']);
+    expect(cache.virtualAccounts).toEqual(['Assets:Budget']);
+  });
+
+  test('commodity styles are collected from the file', () => {
+    const cache = parse(
+      `2024/01/01 A
+    Expenses:X    $1,000.5
+    Expenses:Y    -$3.25
+    Expenses:Z    10.123 USD
+    Assets:Cash`,
+      settings,
+    );
+    expect(cache.commodityMap.get('$')).toMatchObject({
+      prefix: true,
+      spaced: false,
+      precision: 2,
+      thousands: true,
+      negativeBeforeSymbol: true,
     });
-    test('and the middle line is missing', () => {
-      const input: TransactionWithBlock = {
-        type: 'tx',
-        blockLine: -1,
-        block: emptyBlock,
-        value: {
-          date: '2021/12/04',
-          payee: 'Testing',
-          expenselines: [
-            {
-              account: 'account1',
-              amount: 10.5,
-              reconcile: '',
-            },
-            {
-              account: 'account1',
-              reconcile: '',
-            },
-            {
-              account: 'account3',
-              amount: -15.5,
-              reconcile: '',
-            },
-          ],
-        },
-      };
-      const result = fillMissingAmount(input);
-      result.mapErr(fail);
-      expect(input.value.expenselines).toEqual([
-        {
-          account: 'account1',
-          amount: 10.5,
-          reconcile: '',
-        },
-        {
-          account: 'account1',
-          amount: 5,
-          reconcile: '',
-        },
-        {
-          account: 'account3',
-          amount: -15.5,
-          reconcile: '',
-        },
-      ]);
+    expect(cache.commodityMap.get('USD')).toMatchObject({
+      prefix: false,
+      spaced: true,
+      precision: 3,
     });
+    expect(cache.commodities[0].symbol).toEqual('$');
   });
 });
