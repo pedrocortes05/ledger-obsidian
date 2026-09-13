@@ -583,6 +583,10 @@ const costOf = (posting: EnhancedExpenseLine): Amount[] => {
   ];
 };
 
+/** `= 0` without a commodity asserts or assigns zero in every commodity. */
+const isNullZero = (amount: Amount): boolean =>
+  amount.commodity === '' && amount.quantity === 0;
+
 /**
  * computeAmounts fills in amounts that are not written in the file (the
  * single empty posting and balance assignments), verifies that transactions
@@ -618,10 +622,20 @@ const computeAmounts = (
     postings.forEach((posting) => {
       if (!posting.hasWrittenAmount && posting.assertion) {
         const { commodity, quantity } = posting.assertion;
-        const current =
-          (balanceOf(posting.dealiasedAccount).get(commodity) || 0) +
-          (pending.get(posting.dealiasedAccount)?.get(commodity) || 0);
-        posting.amounts = [{ commodity, quantity: quantity - current }];
+        const current = new Map(balanceOf(posting.dealiasedAccount));
+        pending
+          .get(posting.dealiasedAccount)
+          ?.forEach((q, c) => addToAmountMap(current, c, q));
+        if (isNullZero(posting.assertion)) {
+          // `= 0` without a commodity empties the account in every commodity.
+          posting.amounts = [...current.entries()]
+            .filter(([c, q]) => Math.abs(q) > tol(c))
+            .map(([c, q]) => ({ commodity: c, quantity: -q }));
+        } else {
+          posting.amounts = [
+            { commodity, quantity: quantity - (current.get(commodity) || 0) },
+          ];
+        }
       }
       if (posting.amounts.length > 0) {
         let map = pending.get(posting.dealiasedAccount);
@@ -674,9 +688,10 @@ const computeAmounts = (
         continue;
       }
 
-      // With exactly two commodities and no prices ledger infers the exchange
-      // rate, so only a single unbalanced commodity is an error.
-      if (unbalanced.length === 1 && sums.size === 1) {
+      // With two unbalanced commodities and no prices ledger infers the
+      // exchange rate, so only a single unbalanced commodity is an error.
+      // Commodities that cancel out do not count.
+      if (unbalanced.length === 1) {
         const [commodity, quantity] = unbalanced[0];
         txError(
           `Transaction does not balance: off by ${quantity.toFixed(
@@ -698,6 +713,19 @@ const computeAmounts = (
       );
       if (posting.assertion && posting.hasWrittenAmount) {
         const { commodity, quantity } = posting.assertion;
+        if (isNullZero(posting.assertion)) {
+          const nonZero = [...balance.entries()].filter(
+            ([c, q]) => Math.abs(q) > tol(c),
+          );
+          if (nonZero.length > 0) {
+            txError(
+              `Balance assertion failed for ${posting.account}: expected 0, found ${nonZero
+                .map(([c, q]) => `${q.toFixed(2)} ${c}`.trim())
+                .join(', ')}`,
+            );
+          }
+          return;
+        }
         const actual = balance.get(commodity) || 0;
         if (Math.abs(actual - quantity) > tol(commodity)) {
           txError(

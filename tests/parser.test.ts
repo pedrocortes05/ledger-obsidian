@@ -234,6 +234,66 @@ describe('parse()', () => {
     expect(cache.parsingErrors[0].message).toMatch(/does not balance/);
   });
 
+  test('unbalanced commodity is reported when another commodity cancels out', () => {
+    const cache = parse(
+      `2024/01/01 A
+    Expenses:Food    $10
+    Assets:Cash    -$5
+    Assets:Y    5 EUR
+    Assets:Y    -5 EUR`,
+      settings,
+    );
+    expect(cache.parsingErrors.map((e) => e.message)).toEqual([
+      'Transaction does not balance: off by 5.00 $',
+    ]);
+  });
+
+  test('two unbalanced commodities imply an exchange rate', () => {
+    const cache = parse(
+      '2024/01/01 A\n  Assets:Brokerage  10 AAPL\n  Assets:Cash  -$1500',
+      settings,
+    );
+    expect(cache.parsingErrors).toEqual([]);
+  });
+
+  test('= 0 without a commodity empties every commodity', () => {
+    const cache = parse(
+      `2024/01/01 Gift
+    Assets:Gift    $50
+    Assets:Gift    20 USD
+    Income:Gift
+
+2024/01/02 Spend
+    Assets:Gift    = 0
+    Expenses:Gift
+
+2024/01/03 Check
+    Assets:Gift    $0 = 0
+    Equity`,
+      settings,
+    );
+    expect(cache.parsingErrors).toEqual([]);
+    const spend = getPostings(cache.transactions[1]);
+    expect(spend[0].amounts).toEqual([
+      { commodity: '$', quantity: -50 },
+      { commodity: 'USD', quantity: -20 },
+    ]);
+    expect(spend[1].amounts).toEqual([
+      { commodity: '$', quantity: 50 },
+      { commodity: 'USD', quantity: 20 },
+    ]);
+  });
+
+  test('= 0 assertion fails when any commodity remains', () => {
+    const cache = parse(
+      '2024/01/01 A\n  Assets:X  $10\n  Assets:X  5 USD = 0\n  Equity',
+      settings,
+    );
+    expect(cache.parsingErrors[0].message).toMatch(
+      /Balance assertion failed for Assets:X: expected 0, found 10.00 \$, 5.00 USD/,
+    );
+  });
+
   test('half-cent rounding is tolerated like ledger-cli', () => {
     const cache = parse(
       `2025/03/31 TSLA buy
