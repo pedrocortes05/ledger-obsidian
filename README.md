@@ -1,67 +1,100 @@
-# Ledger for Obsidian
+# Ledger for Obsidian (fork)
 
-Personal finance tracking and planning, from the comfort of Obsidian! All of
-your data is stored in plain text, and interoperable with any tool which
-supports the [Ledger CLI](https://www.ledger-cli.org). Stop giving away your
-personal financial information to online sites that sell your data. Store it
-safely in your Obsidian Vault instead.
+Personal finance tracking from the comfort of Obsidian. All of your data is
+stored in a plain text [Ledger](https://www.ledger-cli.org) file in your vault
+and stays compatible with `ledger` and other plain text accounting tools.
+
+This is a fork of [tgrosinger/ledger-obsidian](https://github.com/tgrosinger/ledger-obsidian).
 
 ## Features
 
-- [x] Widget to quickly input expenses.
-  - Use it with Obsidian Mobile to track expenses as they occur on the go!
-- [x] Auto suggest previous accounts and expenses to speed entry.
-- [x] Obsidian Protocol handling to quickly launch Obsidian and immediately record a transaction
-  - Create a Shortcut on mobile to `obsidian://ledger`
-- [ ] Reporting (In progress!)
-- [ ] Account reconciliation (planned soon!)
+- **Quick entry** with the `Add to Ledger` command, ribbon icon or an
+  `obsidian://ledger` link (works on mobile).
+  - Payees and accounts are suggested by how recently you used them.
+  - Picking a known payee fills in the accounts, amounts, currency and budget
+    lines of its last transaction.
+  - Any commodity: `$`, `USD`, `EUR`, shares, crypto or quoted commodities like
+    `"Gel Beta Fuel"`. The list comes from your ledger file and new amounts are
+    written in the same style.
+  - Leave one amount empty to balance the transaction automatically.
+  - Budget lines are written as virtual postings, e.g.
+    `2024/11/29 (Budget:Boston) Star Market` with `(Budget:Boston)  -34.73 USD`.
+  - New transactions are inserted in date order.
+- **Dashboard** (desktop and mobile) for any `.ledger` file:
+  - Net worth and account charts per commodity (commodities are never added
+    together or converted).
+  - Date presets: this month, last 3 months, year to date, last 12 months, all
+    time, or a custom range.
+  - **Budgets** tab summarizing every virtual account.
+  - **Unreviewed** tab listing transactions tagged `:unreviewed:` with a
+    _Mark reviewed_ action.
+  - Edit, copy and delete transactions. Edits keep everything the form does not
+    show (prices, lots, assertions, metadata comments) exactly as written.
 
-![Demo](https://raw.githubusercontent.com/tgrosinger/ledger-obsidian/main/resources/screenshots/demo.gif)
+### Supported Ledger syntax
 
-## More Info
+Accounts with spaces, digits, hyphens and accents; `$10`, `-$10`, `$-10`,
+`10 USD`, quoted commodities; `@` and `@@` prices, `{lot}` costs and `[lot dates]`;
+balance assertions and assignments (`= $500`); `(virtual)` and `[balanced virtual]`
+postings; header status, codes, aux dates and notes; `alias`, `account`,
+`commodity`, `payee` and `P` directives. Periodic (`~`) and automated (`=`)
+transactions and `comment` blocks are skipped. `include` is not supported.
 
-For more information about Ledger, see the following resources:
+Missing amounts are inferred like ledger-cli, per commodity, and balance
+assertions are verified. Problems are listed at the top of the dashboard.
+
+## Commands
+
+- `Add to Ledger` – open the transaction form.
+- `Open Ledger dashboard` – open the dashboard for the ledger file configured in
+  the settings. Clicking any `.ledger` file also opens its dashboard.
+- `Reset Ledger Tutorial progress` – show the dashboard tutorial again.
+
+## Quick entry links
+
+Create a shortcut (e.g. on your phone home screen) to a link like:
+
+```
+obsidian://ledger?payee=Uber&amount=149.92&currency=$&account=Expenses:Transport&from=Assets:Checking
+```
+
+| Parameter  | Meaning                                                                 |
+| ---------- | ----------------------------------------------------------------------- |
+| `type`     | `expense`, `income` or `transfer`                                       |
+| `payee`    | Payee. Without `account`/`from`, the last transaction for it is copied. |
+| `amount`   | Total amount, e.g. `149.92`                                             |
+| `currency` | Commodity, e.g. `$` or `USD`                                            |
+| `account`  | Expense account (expense), deposit account (income) or "to" (transfer)  |
+| `from`     | Paying account (expense), income account (income) or "from" (transfer)  |
+| `date`     | `YYYY-MM-DD`                                                            |
+| `comment`  | Memo for the first line                                                 |
+
+All parameters are optional and invalid values are ignored. The form always
+opens so you can review before saving.
+
+## Development
+
+```sh
+yarn install
+yarn dev        # rebuild main.js on change
+yarn build      # type check and production build
+yarn test
+yarn lint
+```
+
+`yarn check-ledger path/to/file.ledger` parses a ledger file with the plugin and
+compares every account balance, per commodity, with `ledger register`. It
+requires the `ledger` executable and never modifies the file.
+
+To try a build, copy `main.js`, `manifest.json` and `styles.css` into
+`<vault>/.obsidian/plugins/ledger-obsidian-pedro/`.
+
+## More info
 
 - <https://www.ledger-cli.org>
 - <https://plaintextaccounting.org>
 
-## Available Commands
-
-You can run these commands from the Obsidian Command Palette to quickly access
-features of the Ledger plugin.
-
-`Add to Ledger`
-
-Open a window to input details for a new transaction. The details will be stored
-to your default Ledger file configured in the settings.
-
-`Open Ledger dashboard`
-
-Switch your current window to the Ledger Dashboard. The dashboard will show you
-transactions for the default zledger file configured in the settings.
-Alternatively, you can also click on any `.ledger` file in the File Explorer to
-view that file in the dashboard.
-
-`Reset Ledger Tutorial progress`
-
-Want to see the tutorial again? This will reset your progress so the tutorial
-will be shown again the next time you open the dashboard.
-
-## Screenshots
-
-![Ledger Dashboard](https://raw.githubusercontent.com/tgrosinger/ledger-obsidian/main/resources/screenshots/ledger-dashboard.png)
-
-![Add Transaction to Ledger](https://raw.githubusercontent.com/tgrosinger/ledger-obsidian/main/resources/screenshots/add-to-ledger.png)
-
-![Add Transaction to Ledger from mobile](https://raw.githubusercontent.com/tgrosinger/ledger-obsidian/main/resources/screenshots/mobile-add-expense.png)
-
-## Pricing
-
-This plugin is currently provided for free, however will possibly become a paid
-plugin once feature complete. If you would like to say thanks or help support
-continued development, feel free to send a little my way through one of the
-following methods:
+If this plugin is useful to you, consider supporting the original author:
 
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/tgrosinger?style=social)](https://github.com/sponsors/tgrosinger)
 [![Paypal](https://img.shields.io/badge/paypal-tgrosinger-yellow?style=social&logo=paypal)](https://paypal.me/tgrosinger)
-[<img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="BuyMeACoffee" width="100">](https://www.buymeacoffee.com/tgrosinger)

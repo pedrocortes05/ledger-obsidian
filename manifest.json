@@ -2,10 +2,10 @@
   "id": "ledger-obsidian-pedro",
   "name": "Ledger Pedro",
   "author": "Pedro Cortes, forked from Tony Grosinger",
-  "authorUrl": "https://grosinger.net",
-  "description": "Plain text accounting",
+  "authorUrl": "https://github.com/pedrocortes05/ledger-obsidian",
+  "description": "Plain text accounting with Ledger: quick entry, multi-commodity dashboard, budgets.",
   "isDesktopOnly": false,
-  "version": "0.3.3",
-  "minAppVersion": "0.11.12",
+  "version": "0.4.0",
+  "minAppVersion": "1.5.7",
   "js": "main.js"
 }
