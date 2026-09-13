@@ -1,73 +1,123 @@
-import { getWithDefault } from './generic-utils';
-import { EnhancedTransaction } from './parser';
 import { Moment } from 'moment';
 
-export type Interval = 'day' | 'week' | 'month';
+export type Interval = 'day' | 'week' | 'month' | 'year';
+
+export type DatePreset =
+  | 'this-month'
+  | 'last-3-months'
+  | 'ytd'
+  | 'last-12-months'
+  | 'all-time'
+  | 'custom';
+
+export const datePresets: [DatePreset, string][] = [
+  ['this-month', 'This month'],
+  ['last-3-months', 'Last 3 months'],
+  ['ytd', 'Year to date'],
+  ['last-12-months', 'Last 12 months'],
+  ['all-time', 'All time'],
+];
+
+export const ISO_FORMAT = 'YYYY-MM-DD';
+
+export const toISO = (date: Moment): string => date.format(ISO_FORMAT);
+
+export const fromISO = (date: string): Moment =>
+  window.moment(date, ISO_FORMAT);
+
+export interface Bucket {
+  /** First day of the bucket (inclusive). */
+  startISO: string;
+  /** Last day of the bucket (inclusive). */
+  endISO: string;
+}
 
 /**
- * makeBucketNames creates a list of dates at the provided interval between the
- * startDate and the endDate.
+ * makeBuckets splits the range into calendar-aligned periods (weeks, months,
+ * ...). The first and last buckets are clipped to the range so the last,
+ * partial period is always included.
  */
-export const makeBucketNames = (
+export const makeBuckets = (
   interval: Interval,
   startDate: Moment,
   endDate: Moment,
-): string[] => {
-  // TODO: We need to make sure the end of the range is captured. Right now it
-  // seems there is either bug here or where we put data into the buckets which
-  // is preventing all the transactions from being represented in the chart.
+): Bucket[] => {
+  const buckets: Bucket[] = [];
+  const end = endDate.clone().startOf('day');
+  let current = startDate.clone().startOf('day');
+  if (current.isAfter(end)) {
+    return buckets;
+  }
 
-  const names: string[] = [];
-  const currentDate = startDate.clone();
+  while (!current.isAfter(end)) {
+    const periodEnd = current.clone().endOf(interval).startOf('day');
+    const bucketEnd = periodEnd.isAfter(end) ? end : periodEnd;
+    buckets.push({ startISO: toISO(current), endISO: toISO(bucketEnd) });
+    current = bucketEnd.clone().add(1, 'day');
+  }
+  return buckets;
+};
 
-  do {
-    names.push(currentDate.format('YYYY-MM-DD'));
-    currentDate.add(1, interval);
-  } while (currentDate.isSameOrBefore(endDate));
-
-  return names;
+export const formatBucketLabel = (bucket: Bucket, interval: Interval): string => {
+  const start = fromISO(bucket.startISO);
+  switch (interval) {
+    case 'day':
+    case 'week':
+      return start.format('MMM D');
+    case 'month':
+      return start.format('MMM YY');
+    case 'year':
+      return start.format('YYYY');
+  }
 };
 
 /**
- * bucketTransactions sorts the provided transactions into the appropriate
- * bucket name provided. Transactions will be put in the bucket whose name is
- * most closely the same or before the transaction date.
- *
- * Assumes that bucketNames are in chronological order from earliest to latest.
+ * suggestInterval picks an interval that keeps the number of chart points
+ * readable.
  */
-export const bucketTransactions = (
-  bucketNames: string[],
-  txs: EnhancedTransaction[],
-): Map<Moment, EnhancedTransaction[]> => {
-  let firstBucketMoment: Moment;
-  const restBucketMoments: Moment[] = [];
-  const buckets = new Map<Moment, EnhancedTransaction[]>();
-  bucketNames.forEach((name, i) => {
-    const m = window.moment(name);
-    buckets.set(m, []);
+export const suggestInterval = (start: Moment, end: Moment): Interval => {
+  const days = end.diff(start, 'days');
+  if (days <= 45) {
+    return 'day';
+  }
+  if (days <= 200) {
+    return 'week';
+  }
+  if (days <= 365 * 4) {
+    return 'month';
+  }
+  return 'year';
+};
 
-    if (i === 0) {
-      firstBucketMoment = m;
-    } else {
-      restBucketMoments.push(m);
-    }
-  });
-
-  const makeEmptyBucket = (): EnhancedTransaction[] => [];
-  txs.forEach((tx) => {
-    let prevBucket = firstBucketMoment;
-    for (let i = 0; i < restBucketMoments.length; i++) {
-      const m = window.moment(tx.value.date);
-      if (m.isBefore(restBucketMoments[i])) {
-        break;
-      }
-      prevBucket = restBucketMoments[i];
-    }
-
-    // getWithDefault is only necessary for the type checker here. We just put
-    // this bucket in the map, so it will not be missing.
-    getWithDefault(buckets, prevBucket, makeEmptyBucket).push(tx);
-  });
-
-  return buckets;
+/**
+ * presetRange returns the start and end date for a preset. The end date is the
+ * later of today and the last transaction, so future-dated transactions are
+ * included.
+ */
+export const presetRange = (
+  preset: DatePreset,
+  firstDate: Moment,
+  lastDate: Moment,
+): { start: Moment; end: Moment } => {
+  const today = window.moment().startOf('day');
+  const end = lastDate.isAfter(today) ? lastDate.clone() : today;
+  switch (preset) {
+    case 'this-month':
+      return { start: today.clone().startOf('month'), end };
+    case 'last-3-months':
+      return {
+        start: today.clone().subtract(2, 'months').startOf('month'),
+        end,
+      };
+    case 'ytd':
+      return { start: today.clone().startOf('year'), end };
+    case 'last-12-months':
+      return {
+        start: today.clone().subtract(11, 'months').startOf('month'),
+        end,
+      };
+    case 'all-time':
+    case 'custom':
+      return { start: firstDate.clone().startOf('day'), end };
+  }
 };
