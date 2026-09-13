@@ -1,712 +1,465 @@
 import { LedgerModifier } from '../file-interface';
+import {
+  accountSuggestions,
+  autofillFromPayee,
+  balancingAmount,
+  buildTransactionText,
+  commodityOptions,
+  FormContext,
+  initialValues,
+  Line,
+  lineLabel,
+  linesAreUntouched,
+  makeLine,
+  minDecimalsFor,
+  seedFirstLine,
+  validateValues,
+  ValueErrors,
+  Values,
+} from '../form-logic';
 import { Operation } from '../modals';
-import {
-  EnhancedExpenseLine,
-  EnhancedTransaction,
-  TransactionCache,
-} from '../parser';
-import { formatTransaction, getTotalAsNum } from '../transaction-utils';
-import { CurrencyInputFormik } from './CurrencyInput';
+import { EnhancedTransaction, TransactionCache } from '../parser';
+import { TransactionPrefill } from '../prefill';
+import { ISettings } from '../settings';
+import { TxType } from '../transaction-utils';
+import { CurrencyInput } from './CurrencyInput';
 import { TextSuggest } from './TextSuggest';
-import {
-  ErrorMessage,
-  Field,
-  FieldArray,
-  FieldProps,
-  Form,
-  Formik,
-  FormikProps,
-} from 'formik';
-import { union } from 'lodash';
-import { err, ok, Result } from 'neverthrow';
 import React from 'react';
 import styled from 'styled-components';
 
-const CurrencyOptions = [
-  { label: '($) MXN', value: 'MXN' },
-  { label: '($) USD', value: 'USD' },
-  { label: '(€) EUR', value: 'EUR' },
-  { label: '(¥) JPY', value: 'JPY' },
-]
-
-const ButtonGroupStyle = styled.div`
-  display: flex;
-
-  .button {
-    background: var(--background-secondary-alt);
-    color: var(--text-normal);
-    cursor: pointer;
-    text-align: center;
-    margin-left: 0;
-    margin-right: 0;
-    flex-grow: 1;
-    flex-basis: 1;
+const FormStyles = styled.div`
+  .ledger-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 6px 0;
   }
 
-  .button:first-child {
+  .ledger-grow {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  input[type='text'],
+  input[type='date'] {
+    width: 100%;
+  }
+
+  .ledger-button-group {
+    display: flex;
+    margin: 6px 0 12px;
+  }
+
+  .ledger-button-group button {
+    flex: 1 1 0;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .ledger-button-group button:first-child {
     border-radius: 4px 0 0 4px;
   }
 
-  .button:last-child {
+  .ledger-button-group button:last-child {
     border-radius: 0 4px 4px 0;
   }
 
-  .button:only-child {
+  .ledger-error {
+    color: var(--text-error);
+    font-size: var(--font-ui-small);
+    margin: 2px 0 6px;
+  }
+
+  .ledger-hint {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    margin: 2px 0 6px;
+  }
+
+  .ledger-line {
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding: 4px 0;
+  }
+
+  .ledger-line-label {
+    color: var(--text-muted);
+    font-size: var(--font-ui-smaller);
+  }
+
+  .ledger-icon-button {
+    background: none;
+    box-shadow: none;
+    padding: 4px 6px;
+    color: var(--text-muted);
+  }
+
+  .ledger-amount {
+    flex: 0 1 45%;
+  }
+
+  .ledger-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 12px;
+  }
+
+  .ledger-warning {
+    background: var(--background-modifier-error);
+    padding: 10px 15px;
     border-radius: 4px;
   }
 
-  .selected {
-    background: var(--interactive-accent) !important;
-    color: var(--text-on-accent);
+  .is-mobile & .ledger-row {
+    flex-wrap: wrap;
+  }
+
+  .is-mobile & .ledger-amount {
+    flex-basis: 100%;
   }
 `;
 
-const ButtonGroup: React.FC<
-  {
-    options: [string, string][];
-  } & FieldProps<string, Values>
-> = (props): JSX.Element => (
-  <ButtonGroupStyle>
-    {props.options.map((option) => (
-      <div
-        key={option[0]}
-        className={
-          (props.field.value === option[0] ? 'selected ' : '') + 'button'
-        }
-        onClick={() => {
-          props.form.setFieldValue(props.field.name, option[0]);
-        }}
-      >
-        {option[1]}
-      </div>
-    ))}
-  </ButtonGroupStyle>
-);
-
-/**
- * calcPlaceholderExpenseLineAmount determines the amount that must be assigned
- * to each expense line that does not yet have a value in order for the sum of
- * the expense lines to balance.
- */
-const calcPlaceholderExpenseLineAmount = (
-  values: Values,
-): Result<string, string> => {
-  const linesExceptLast = values.lines.slice(0, -1).filter(
-    (line) => !line.isVirtual,
-  );
-  const numEmptyLines = linesExceptLast.filter(
-    (line) => line.amount === '' && !line.isVirtual,
-  ).length;
-  const unassignedTotal = linesExceptLast.reduce(
-    (amount, line) =>
-      line.amount === '' ? amount : amount - parseFloat(line.amount),
-    parseFloat(values.total),
-  );
-  if (numEmptyLines === 0 && unassignedTotal !== 0) {
-    return err(
-      'All expense lines assigned, however amounts do not balance to 0',
-    );
-  }
-  return ok((unassignedTotal / numEmptyLines).toFixed(2));
-};
-
-const calcPlaceholderExpenseLineAmountTotal = (
-  values: Values,
-): Result<string, string> => {
-  const linesExceptLast = values.lines.slice(0, -1).filter(
-    (line) => !line.isVirtual,
-  );
-  const TotalAmount = linesExceptLast.reduce(
-    (amount, line) =>
-      line.amount === '' ? amount : amount + parseFloat(line.amount),
-    0, // Initial value of the accumulator
-  );
-  
-  return ok((TotalAmount * -1).toFixed(2));
-};
-
-const ExpenseLineStyle = styled.div`
-  .arrow {
-    width: 0;
-    height: 0;
-    position: relative;
-    top: 4px;
-    border-top: 8px solid transparent;
-    border-bottom: 8px solid transparent;
-    border-left: 10px solid var(--text-muted);
-    margin-right: 8px;
-
-    flex-shrink: 1;
-    cursor: pointer;
-  }
-
-  .arrow.rotateDown {
-    transform: rotate(90deg);
-  }
-
-  .arrowPlaceholder {
-    padding-left: 23px;
-    flex-shrink: 1;
-  }
-
-  .removeLine {
-    flex-shrink: 1;
-    margin: 7px 7px 4px 1px;
-    fill: var(--text-muted);
-    cursor: pointer;
-  }
-
-  .currencyInput {
-    flex-basis: 200px;
-    flex-shrink: 1;
-  }
-
-  .drawer {
-    display: none;
-  }
-
-  .drawer.expanded {
-    display: flex;
-  }
-`;
+const typeOptions: [TxType, string][] = [
+  ['expense', 'Expense'],
+  ['income', 'Income'],
+  ['transfer', 'Transfer'],
+];
 
 const ExpenseLine: React.FC<{
-  i: number;
-  line: Line;
-  formik: FormikProps<Values>;
-  remove: (index: number) => undefined;
+  index: number;
+  values: Values;
   txCache: TransactionCache;
-  currencySymbol: string;
-}> = ({ i, formik, ...props }): JSX.Element => {
-  const lines = formik.values.lines;
-
-  const getAccountName = (): string => {
-    const line = lines[i]; // Get the current line
-
-    // Check if the line is virtual
-    if (line.isVirtual) {
-      return 'Virtual';
-    }
-
-    const lastI = lines.length - 1;
-    switch (formik.values.txType) {
-      case 'expense':
-        return i !== lastI ? 'Expense' : 'Asset';
-      case 'income':
-        return i !== lastI ? 'Asset' : 'Expense';
-      case 'transfer':
-        return i !== lastI ? 'To' : 'From';
-    }
-    return '';
-  };
-
-  const assetsAndLiabilities = union(
-    props.txCache.assetAccounts,
-    props.txCache.liabilityAccounts,
+  commodities: string[];
+  canRemove: boolean;
+  update: (index: number, changes: Partial<Line>) => void;
+  remove: (index: number) => void;
+}> = (props): JSX.Element => {
+  const line = props.values.lines[props.index];
+  const [showMemo, setShowMemo] = React.useState(line.comment !== '');
+  const suggestions = React.useMemo(
+    () => accountSuggestions(props.values, props.index, props.txCache),
+    [props.values.txType, props.values.lines.length, line.virtual, props.index, props.txCache],
   );
-
-  const getSuggestions = (): string[] => {
-    const line = lines[i]; // Get the current line
-
-    // Check if the line is virtual
-    if (line.isVirtual) {
-      return props.txCache.virtualAccounts;
-    }
-
-    const lastI = lines.length - 1;
-    switch (formik.values.txType) {
-      case 'expense':
-        return i !== lastI
-          ? props.txCache.expenseAccounts
-          : assetsAndLiabilities;
-      case 'income':
-        return i !== lastI
-          ? assetsAndLiabilities
-          : props.txCache.expenseAccounts;
-      case 'transfer':
-        return assetsAndLiabilities;
-    }
-    return props.txCache.accounts;
-  };
-
-  const [expanded, setExpanded] = React.useState(false);
+  const placeholder =
+    balancingAmount(props.values, props.index, props.txCache) ?? 'Amount';
 
   return (
-    <ExpenseLineStyle>
-      <Margin className="flexRow">
-        <div
-          className={'arrow' + (expanded ? ' rotateDown' : '')}
-          onClick={() => setExpanded(!expanded)}
-        />
-        <Field
-          className="flexGrow"
-          component={TextSuggest}
-          name={`lines.${i}.account`}
-          placeholder={getAccountName() + ' Account'}
-          suggestions={getSuggestions()}
-        />
-        {i + 1 !== lines.length ? (
-          <Field
-            className="currencyInput"
-            component={CurrencyInputFormik}
-            placeholder={calcPlaceholderExpenseLineAmount(
-              formik.values,
-            ).unwrapOr('Error')}
-            currencySymbol={props.currencySymbol}
-            currencyOptions={CurrencyOptions}
-            name={`lines.${i}.amount`}
-            currencyID={`lines.${i}.currency`}
-          />
-        ) : (
-          <Field
-            className="currencyInput"
-            component={CurrencyInputFormik}
-            placeholder={calcPlaceholderExpenseLineAmountTotal(
-              formik.values,
-            ).unwrapOr('Error')}
-            currencySymbol={props.currencySymbol}
-            currencyOptions={CurrencyOptions}
-            name={`lines.${i}.amount`}
-            currencyID={`lines.${i}.currency`}
-            //disabled={i + 1 === lines.length}
-          />
-        )}
-      </Margin>
-      <div className={'drawer' + (expanded ? ' expanded' : '')}>
-        {i !== 0 && i !== lines.length - 1 ? (
-          <svg
-            className="removeLine"
-            onClick={() => props.remove(i)}
-            width="16"
-            height="16"
-            version="1.1"
-            viewBox="0 0 28 28"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <path d="m6.6465 5.2324-1.4141 1.4141 7.3535 7.3535-7.3535 7.3535 1.4141 1.4141 7.3535-7.3535 7.3535 7.3535 1.4141-1.4141-7.3535-7.3535 7.3535-7.3535-1.4141-1.4141-7.3535 7.3535-7.3535-7.3535z" />
-          </svg>
-        ) : (
-          <div className="arrowPlaceholder" />
-        )}
-        <Field
-          className="flexGrow"
-          type="text"
-          name={`lines.${i}.comment`}
-          placeholder="Memo"
-        />
+    <div className="ledger-line">
+      <div className="ledger-line-label">
+        {lineLabel(props.values, props.index)}
       </div>
-    </ExpenseLineStyle>
+      <div className="ledger-row">
+        <div className="ledger-grow">
+          <TextSuggest
+            value={line.account}
+            onChange={(account) => props.update(props.index, { account })}
+            suggestions={suggestions}
+            placeholder={line.virtual ? 'Budget:Trip' : 'Account'}
+          />
+        </div>
+        <CurrencyInput
+          className="ledger-amount"
+          amount={line.amount}
+          currency={line.currency}
+          commodities={props.commodities}
+          placeholder={placeholder}
+          minDecimals={(currency) => minDecimalsFor(props.txCache, currency)}
+          onAmountChange={(amount) => props.update(props.index, { amount })}
+          onCurrencyChange={(currency) => props.update(props.index, { currency })}
+        />
+        <button
+          type="button"
+          className="ledger-icon-button"
+          aria-label="Add memo"
+          title="Memo"
+          onClick={() => setShowMemo(!showMemo)}
+        >
+          ✎
+        </button>
+        {props.canRemove ? (
+          <button
+            type="button"
+            className="ledger-icon-button"
+            aria-label="Remove line"
+            title="Remove line"
+            onClick={() => props.remove(props.index)}
+          >
+            ✕
+          </button>
+        ) : null}
+      </div>
+      {showMemo ? (
+        <div className="ledger-row">
+          <input
+            type="text"
+            placeholder="Memo"
+            value={line.comment}
+            onChange={(e) => props.update(props.index, { comment: e.target.value })}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 };
 
-const Margin = styled.div`
-  margin: 5px;
-`;
-
-const Warning = styled.div`
-  background: var(--background-modifier-error);
-  width: 458px;
-  padding: 10px 15px;
-`;
-
-const FormStyles = styled.div`
-  .flexRow {
-    display: flex;
-  }
-
-  .flexGrow {
-    flex-grow: 1;
-    /* Not sure why this needs to be a percentage */
-    flex-basis: 40%;
-  }
-
-  .flexShrink {
-    flex-shrink 1;
-  }
-
-  input {
-    width: 100%;
-  }
-`;
-
-/**
- * Line is analagous to EnhancedExpenseLine, however the types are slightly
- * different to facilitate with use in the form.
- */
-interface Line {
-  id: number;
-  account: string;
-  amount: string;
-  comment: string;
-  reconcile: '' | '*' | '!';
-  currency?: string;
-  isVirtual?: boolean;
-}
-
-const lineToEnhancedExpenseLine = (line: Line): EnhancedExpenseLine => ({
-  account: line.account,
-  dealiasedAccount: line.account,
-  amount: parseFloat(line.amount),
-  reconcile: line.reconcile,
-  comment: line.comment || undefined,
-  currency: line.currency,
-  isVirtual: line.isVirtual,
-});
-
-export interface Values {
-  payee: string;
-  txType: string;
-  date: string;
-  total: string;
-  lines: Line[];
-  currencyType: string;
-}
-
-interface ValueErrors {
-  payee?: string;
-  date?: string;
-  total?: string;
-  lines?: string;
-  currencyType?: string;
-}
+const titles: Record<Operation, string> = {
+  new: 'Add to Ledger',
+  clone: 'Copy transaction',
+  modify: 'Edit transaction',
+};
 
 export const EditTransaction: React.FC<{
   displayFileWarning: boolean;
-  currencySymbol: string;
+  settings: ISettings;
   initialState: EnhancedTransaction;
   operation: Operation;
+  prefill?: TransactionPrefill;
   updater: LedgerModifier;
   txCache: TransactionCache;
   close: () => void;
 }> = (props): JSX.Element => {
-  const isNew = props.operation === 'new';
+  const ctx: FormContext = React.useMemo(
+    () => ({
+      operation: props.operation,
+      settings: props.settings,
+      txCache: props.txCache,
+      initialState: props.initialState,
+    }),
+    [props.operation, props.settings, props.txCache, props.initialState],
+  );
+  const initial = React.useMemo(() => initialValues(ctx, props.prefill), [ctx]);
+  const [values, setValues] = React.useState<Values>(initial.values);
+  const [errors, setErrors] = React.useState<ValueErrors>({});
   const [page, setPage] = React.useState(1);
+  const [submitting, setSubmitting] = React.useState(false);
+  const [autofillSource, setAutofillSource] = React.useState<string | null>(null);
+  const seed = React.useRef<string | undefined>(
+    initial.values.lines[0]?.amount === initial.values.total
+      ? initial.values.total
+      : undefined,
+  );
+  const commodities = React.useMemo(
+    () => commodityOptions(props.settings, props.txCache),
+    [props.settings, props.txCache],
+  );
+  const payeeSuggestions = props.txCache.payees;
 
-  const initialValues: Values = {
-    payee: isNew ? '' : props.initialState.value.payee,
-    txType: isNew ? 'expense' : 'unknown',
-    date: isNew
-      ? window.moment().format('YYYY-MM-DD')
-      : window.moment(props.initialState.value.date).format('YYYY-MM-DD'),
-    total: isNew ? '' : getTotalAsNum(props.initialState).toString(),
-    lines: isNew
-      ? [
-          {
-            id: 0,
-            account: '',
-            amount: '',
-            comment: '',
-            reconcile: '',
-            currency: '',
-          },
-          {
-            id: 1,
-            account: '',
-            amount: '',
-            comment: '',
-            reconcile: '',
-            currency: '',
-          },
-        ]
-      : props.initialState.value.expenselines
-          .filter((line): line is EnhancedExpenseLine => 'account' in line)
-          .map(
-            (line, i): Line => ({
-              id: i,
-              account: line.account,
-              amount: line.amount.toFixed(2),
-              comment: line.comment || '',
-              reconcile: line.reconcile,
-              currency: line.currency,
-            }),
-          ),
-    currencyType: isNew ? '$' : '$',
+  const set = (changes: Partial<Values>): void =>
+    setValues((current) => ({ ...current, ...changes }));
+
+  const updateLine = (index: number, changes: Partial<Line>): void =>
+    setValues((current) => ({
+      ...current,
+      lines: current.lines.map((line, i) => (i === index ? { ...line, ...changes } : line)),
+    }));
+
+  const removeLine = (index: number): void =>
+    setValues((current) => ({
+      ...current,
+      lines: current.lines.filter((_, i) => i !== index),
+    }));
+
+  const addLine = (virtual: boolean): void =>
+    setValues((current) => {
+      const line = makeLine({ currency: current.currency, virtual: virtual ? '(' : '' });
+      const lines = [...current.lines];
+      // New splits go before the paying account; budget lines go at the end
+      // of the real postings, like the existing file.
+      lines.splice(Math.max(lines.length - 1, 0), 0, line);
+      return { ...current, lines };
+    });
+
+  const handlePayeeSelected = (payee: string): void => {
+    if (props.operation !== 'new' || !linesAreUntouched(values)) {
+      return;
+    }
+    const result = autofillFromPayee(values, payee, ctx);
+    if (result) {
+      seed.current = result.values.lines[0]?.amount === result.values.total
+        ? result.values.total
+        : undefined;
+      setValues(result.values);
+      setAutofillSource(result.source.value.date);
+    }
   };
+
+  const goToLines = (): void => {
+    const pageErrors = validateValues(values, ctx);
+    const relevant: ValueErrors = {
+      date: pageErrors.date,
+      payee: pageErrors.payee,
+      total: pageErrors.total,
+    };
+    setErrors(relevant);
+    if (relevant.date || relevant.payee || relevant.total) {
+      return;
+    }
+    const seeded = seedFirstLine(values, seed.current);
+    if (seeded !== values) {
+      seed.current = values.total;
+    }
+    setValues(seeded);
+    setPage(2);
+  };
+
+  const submit = async (): Promise<void> => {
+    const allErrors = validateValues(values, ctx);
+    setErrors(allErrors);
+    if (Object.values(allErrors).some((e) => e)) {
+      if (allErrors.date || allErrors.payee || allErrors.total) {
+        setPage(1);
+      }
+      return;
+    }
+    setSubmitting(true);
+    const text = buildTransactionText(values, ctx, initial.leadingComments);
+    const ok =
+      props.operation === 'modify'
+        ? await props.updater.updateTransaction(props.initialState, text)
+        : await props.updater.addTransaction(text, values.date);
+    setSubmitting(false);
+    if (ok) {
+      props.close();
+    }
+  };
+
+  const realLineCount = values.lines.filter((line) => line.virtual === '').length;
 
   return (
     <FormStyles>
-      <h2>Add to Ledger</h2>
+      <h2>{titles[props.operation]}</h2>
 
       {props.displayFileWarning ? (
-        <Warning>
+        <div className="ledger-warning">
           Please rename your ledger file to end with the .ledger extension. Once
           renamed, please update the configuration option in the Ledger plugin
           settings.
-        </Warning>
+        </div>
       ) : null}
 
-      <Formik
-        initialValues={initialValues}
-        validateOnChange={false}
-        validate={(values) => {
-          const errors: ValueErrors = {};
-
-          if (values.date === '') {
-            errors.date = 'Required';
-          }
-          if (values.total === '') {
-            errors.total = 'Required';
-          } else if (Number.isNaN(parseFloat(values.total))) {
-            errors.total = 'Total must be a number';
-          }
-          if (values.txType !== 'transfer' && values.payee === '') {
-            errors.payee = 'Required';
-          }
-
-          if (values.lines.some((line) => line.account === '')) {
-            errors.lines = 'All expense lines must specify an account';
-          }
-
-          if (values.lines.filter((line) => line.amount === '').length === 0) {
-            var currencies = new Set<string>();
-            for (var i = 0; i < values.lines.length; i++) {
-              currencies.add(values.lines[i].currency || '');
-            }
-          
-            // Check if all lines have the same currency
-            if (currencies.size > 1) {
-              // Skip validation if lines have different currencies
-              return;
-            }
-
-            // Validate that the amounts all add to zero
-            const sum = values.lines.reduce(
-              (acc, line) => parseFloat(line.amount) + acc,
-              0,
-            );
-            if (sum !== 0) {
-              errors.lines = `Amounts add up to $${sum.toFixed(
-                2,
-              )} but must add up to $0`;
-            }
-          }
-
-          return errors;
-        }}
-        onSubmit={(values) => {
-          // console.log("What are the vnpm aleus: ", values);
-          if (values.lines.filter((line) => line.amount === '').length > 0) {
-            // Fill missing values in the expense lines
-            calcPlaceholderExpenseLineAmount(values).map((amount) => {
-              values.lines.forEach((line) => {
-                if (line.amount === '') {
-                  line.amount = amount;
-                }
-              });
-            });
-          }
-
-          let localPayee = values.payee;
-          if (values.txType === 'transfer') {
-            const accountNames = values.lines.map((line) =>
-              line.account.split(':').last(),
-            );
-            const to = accountNames.slice(0, -1).join(' and ');
-            const from = accountNames.last();
-            localPayee = `${from} to ${to}`;
-          }
-
-          // This tx is not fully valid because we are not specifying a valid block.
-          // It's only complete enough that we can format it into a string.
-          const newTx: EnhancedTransaction = {
-            blockLine: -1,
-            block: {
-              firstLine: -1,
-              lastLine: -1,
-              block: '',
-            },
-            type: 'tx',
-            value: {
-              payee: localPayee,
-              // TODO: This is not a ISO8601. Once reconciliation is added, remove this and reformat file.
-              date: values.date.replace(/-/g, '/'),
-              expenselines: values.lines.map((line) =>
-                lineToEnhancedExpenseLine(line),
-              ),
-              check: props.initialState.value.check,
-              comment: props.initialState.value.comment,
-              currencyType: values.currencyType,
-            },
-          };
-
-          const txStr = formatTransaction(newTx, props.currencySymbol);
-          // console.log("txstr: ", txStr);
-
-          switch (props.operation) {
-            case 'new':
-            case 'clone':
-              props.updater.appendLedger(txStr).then(props.close);
-              break;
-            case 'modify':
-              props.updater
-                .updateTransaction(props.initialState, txStr)
-                .then(props.close);
-              break;
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (page === 1) {
+            goToLines();
+          } else {
+            submit();
           }
         }}
       >
-        {(formik) => (
-          <Form>
-            {page === 1 ? (
-              <>
-                <Margin>
-                  <Field
-                    name="txType"
-                    component={ButtonGroup}
-                    options={[
-                      ['expense', 'Expense'],
-                      ['income', 'Income'],
-                      ['transfer', 'Transfer'],
-                    ]}
-                  />
-                </Margin>
-                
-                <div className="flexRow">
-                  <Margin className="flexGrow">
-                    <Field
-                      component={CurrencyInputFormik}
-                      currencySymbol={props.currencySymbol}
-                      name="total"
-                      placeholder="Total Amount"
-                      currencyOptions={CurrencyOptions}
-                    />
-                    <ErrorMessage name="total" component="div" />
-                  </Margin>
-                  <Margin className="flexShrink">on</Margin>
-                  <Margin className="flexGrow">
-                    <Field type="date" name="date" />
-                    <ErrorMessage name="date" component="div" />
-                  </Margin>
-                </div>
-
-                {formik.values.txType !== 'transfer' && (
-                  <Margin>
-                    <Field
-                      component={TextSuggest}
-                      name="payee"
-                      placeholder="Payee (e.g. Obsidian.md)"
-                      suggestions={props.txCache.payees}
-                    />
-                    <ErrorMessage name="payee" component="div" />
-                  </Margin>
-                )}
-              </>
-            ) : (
-              <div className="expenseLines">
-                <FieldArray name="lines">
-                  {({ insert, remove }) => (
-                    <>
-                      {formik.values.lines.map((line, i) => (
-                        <ExpenseLine
-                          key={line.id}
-                          line={line}
-                          formik={formik}
-                          i={i}
-                          remove={remove}
-                          txCache={props.txCache}
-                          currencySymbol={props.currencySymbol}
-                        />
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const prevMaxID = formik.values.lines.reduce(
-                            (max, line) => Math.max(max, line.id),
-                            -1,
-                          );
-                          const newLine: Line = {
-                            id: prevMaxID + 1,
-                            account: '',
-                            amount: '',
-                            comment: '',
-                            reconcile: '',
-                            currency: '',
-                          };
-                          insert(formik.values.lines.length - 1, newLine);
-                        }}
-                      >
-                        Add Split
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const prevMaxID = formik.values.lines.reduce(
-                            (max, line) => Math.max(max, line.id),
-                            -1,
-                          );
-                          const newLine: Line = {
-                            id: prevMaxID + 1,
-                            account: '',
-                            amount: '',
-                            comment: '',
-                            reconcile: '',
-                            currency: '',
-                            isVirtual: true,
-                          };
-                          insert(formik.values.lines.length - 1, newLine);
-                        }}
-                      >
-                        Add Virtual Transaction
-                      </button>
-                    </>
-                  )}
-                </FieldArray>
-                <ErrorMessage name="lines" component="div" />
-              </div>
-            )}
-
-            <Margin>
-              {page === 1 && (
+        {page === 1 ? (
+          <>
+            <div className="ledger-button-group" role="group">
+              {typeOptions.map(([type, label]) => (
                 <button
+                  key={type}
                   type="button"
-                  onClick={() => {
-                    let hadError = false;
-                    if (formik.values.total === '') {
-                      formik.setFieldTouched('total', true, true);
-                      formik.validateForm();
-                      hadError = true;
-                    }
-
-                    if (
-                      formik.values.txType !== 'transfer' &&
-                      formik.values.payee === ''
-                    ) {
-                      formik.setFieldTouched('payee', true, true);
-                      formik.validateForm();
-                      hadError = true;
-                    }
-
-                    if (!hadError) {
-                      // The final expense line should be set to the opposite of the total
-                      const firstLine = 0;
-                      formik.values.lines[firstLine].amount = parseFloat(formik.values.total).toFixed(2);
-                      setPage(page + 1);
-                    }
-                  }}
+                  className={values.txType === type ? 'mod-cta' : ''}
+                  onClick={() => set({ txType: type })}
                 >
-                  Next
+                  {label}
                 </button>
-              )}
-              {page === 2 && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPage(page - 1);
-                    }}
-                  >
-                    Back
-                  </button>
-                  <button type="submit" disabled={formik.isSubmitting}>
-                    Submit
-                  </button>
-                </>
-              )}
-            </Margin>
-          </Form>
+              ))}
+            </div>
+
+            {values.txType !== 'transfer' ? (
+              <>
+                <TextSuggest
+                  value={values.payee}
+                  onChange={(payee) => set({ payee })}
+                  onSelect={handlePayeeSelected}
+                  suggestions={payeeSuggestions}
+                  placeholder="Payee (e.g. Obsidian.md)"
+                />
+                {errors.payee ? <div className="ledger-error">{errors.payee}</div> : null}
+                {autofillSource ? (
+                  <div className="ledger-hint">
+                    Filled in from the {autofillSource} transaction.{' '}
+                    <a
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        setValues(initial.values);
+                        setAutofillSource(null);
+                        seed.current = undefined;
+                      }}
+                    >
+                      Clear
+                    </a>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
+            <div className="ledger-row">
+              <div className="ledger-grow">
+                <CurrencyInput
+                  amount={values.total}
+                  currency={values.currency}
+                  commodities={commodities}
+                  placeholder="Total amount"
+                  minDecimals={(currency) => minDecimalsFor(props.txCache, currency)}
+                  onAmountChange={(total) => set({ total })}
+                  onCurrencyChange={(currency) => set({ currency })}
+                />
+              </div>
+              <div className="ledger-grow">
+                <input
+                  type="date"
+                  value={values.date}
+                  onChange={(e) => set({ date: e.target.value })}
+                />
+              </div>
+            </div>
+            {errors.total ? <div className="ledger-error">{errors.total}</div> : null}
+            {errors.date ? <div className="ledger-error">{errors.date}</div> : null}
+
+            <div className="ledger-actions">
+              <button type="button" onClick={props.close}>
+                Cancel
+              </button>
+              <button type="submit" className="mod-cta">
+                Next
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {values.lines.map((line, i) => (
+              <ExpenseLine
+                key={line.id}
+                index={i}
+                values={values}
+                txCache={props.txCache}
+                commodities={commodities}
+                canRemove={line.virtual !== '' || realLineCount > 2}
+                update={updateLine}
+                remove={removeLine}
+              />
+            ))}
+            {errors.lines ? <div className="ledger-error">{errors.lines}</div> : null}
+            <div className="ledger-hint">
+              Leave one amount empty to balance the transaction automatically.
+            </div>
+
+            <div className="ledger-actions">
+              <button type="button" onClick={() => addLine(false)}>
+                Add split
+              </button>
+              <button type="button" onClick={() => addLine(true)}>
+                Add budget line
+              </button>
+              <button type="button" onClick={() => setPage(1)}>
+                Back
+              </button>
+              <button type="submit" className="mod-cta" disabled={submitting}>
+                {props.operation === 'modify' ? 'Save' : 'Submit'}
+              </button>
+            </div>
+          </>
         )}
-      </Formik>
+      </form>
     </FormStyles>
   );
 };
