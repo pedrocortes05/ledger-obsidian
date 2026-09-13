@@ -69,9 +69,9 @@ export const formatPosting = (
       minDecimals,
     );
   }
-  const annotations = line.annotations ? ` ${line.annotations}` : '';
   const comment = line.comment ? `  ; ${line.comment}` : '';
-  const amountPart = amount || annotations ? `    ${amount}${annotations}` : '';
+  const amountText = [amount, line.annotations].filter(Boolean).join(' ');
+  const amountPart = amountText ? `    ${amountText}` : '';
   return `${INDENT}${status}${account}${amountPart}${comment}`.trimEnd();
 };
 

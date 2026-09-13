@@ -251,6 +251,7 @@ export const EditTransaction: React.FC<{
       ? initial.values.total
       : undefined,
   );
+  const currencyChosen = React.useRef(!!props.prefill?.currency);
   const commodities = React.useMemo(
     () => commodityOptions(props.settings, props.txCache),
     [props.settings, props.txCache],
@@ -291,11 +292,17 @@ export const EditTransaction: React.FC<{
     if (props.operation !== 'new' || !linesAreUntouched(values)) {
       return;
     }
-    const result = autofillFromPayee(values, payee, ctx);
+    // Never overwrite a total or commodity the user already chose.
+    const result = autofillFromPayee(values, payee, ctx, {
+      total: values.total.trim() !== '',
+      currency: currencyChosen.current,
+    });
     if (result) {
+      // The copied first line holds the previous total; mark it as seeded so
+      // Next replaces it with the total typed now.
       seed.current =
-        result.values.lines[0]?.amount === result.values.total
-          ? result.values.total
+        result.values.lines[0]?.amount === result.sourceTotal
+          ? result.sourceTotal
           : undefined;
       setValues(result.values);
       setAutofillSource(result.source.value.date);
@@ -425,7 +432,10 @@ export const EditTransaction: React.FC<{
                     minDecimalsFor(props.txCache, currency)
                   }
                   onAmountChange={(total) => set({ total })}
-                  onCurrencyChange={(currency) => set({ currency })}
+                  onCurrencyChange={(currency) => {
+                    currencyChosen.current = true;
+                    set({ currency });
+                  }}
                 />
               </div>
               <div className="ledger-grow">

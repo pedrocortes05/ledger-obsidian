@@ -213,7 +213,10 @@ export const autofillFromPayee = (
   values: Values,
   payee: string,
   ctx: FormContext,
-): { values: Values; source: EnhancedTransaction } | undefined => {
+  keep: { total?: boolean; currency?: boolean } = {},
+):
+  | { values: Values; source: EnhancedTransaction; sourceTotal: string }
+  | undefined => {
   const source = findLastTransactionForPayee(ctx.txCache, payee);
   if (!source) {
     return undefined;
@@ -222,13 +225,16 @@ export const autofillFromPayee = (
   if (lines.length === 0) {
     return undefined;
   }
+  const totals = primaryTotal(source, ctx.txCache);
   return {
     source,
+    sourceTotal: totals.total,
     values: {
       ...values,
       payee: source.value.payee,
       txType: inferTxType(source, ctx.settings),
-      ...primaryTotal(source, ctx.txCache),
+      total: keep.total ? values.total : totals.total,
+      currency: keep.currency ? values.currency : totals.currency,
       lines,
     },
   };
@@ -421,6 +427,18 @@ export const balancingAmount = (
   );
 };
 
+/**
+ * isAssignment is true for a line loaded from a balance assignment
+ * (`Account  = $500`) whose amount and commodity were left as they were. Its
+ * amount comes from the running balance, so it cannot be checked in the form.
+ */
+const isAssignment = (line: Line): boolean =>
+  line.amount.trim() === '' &&
+  !!line.original &&
+  !line.original.hasWrittenAmount &&
+  !!line.original.assertion &&
+  line.currency === line.original.currency;
+
 export const validateValues = (
   values: Values,
   ctx: FormContext,
@@ -454,13 +472,6 @@ export const validateValues = (
   if (values.lines.length < 2) {
     lineErrors.push('A transaction needs at least two accounts.');
   }
-  // A line kept from the file with a balance assignment (`= $500`) gets its
-  // amount from the running balance, so it cannot be checked here.
-  const isAssignment = (line: Line): boolean =>
-    line.amount.trim() === '' &&
-    !!line.original &&
-    !line.original.hasWrittenAmount &&
-    !!line.original.assertion;
   const emptyReal = realLines.filter(
     (line) => line.amount.trim() === '' && !isAssignment(line),
   );
@@ -494,18 +505,22 @@ export const validateValues = (
         addToAmountMap(sums, line.currency, quantity);
       }
     });
-    // With several commodities the exchange rate is implied, like ledger-cli.
-    if (sums.size === 1 && !hasPrice) {
-      const [commodity, quantity] = [...sums.entries()][0];
+    const unbalanced = [...sums.entries()].filter(
+      ([commodity, quantity]) =>
+        Math.abs(quantity) >
+        tolerance(ctx.txCache.commodityMap.get(commodity)?.precision ?? 2),
+    );
+    // With two unbalanced commodities the exchange rate is implied, like
+    // ledger-cli. Commodities that cancel out do not count.
+    if (unbalanced.length === 1 && !hasPrice) {
+      const [commodity, quantity] = unbalanced[0];
       const info = ctx.txCache.commodityMap.get(commodity);
-      if (Math.abs(quantity) > tolerance(info?.precision ?? 2)) {
-        lineErrors.push(
-          `Amounts add up to ${formatAmount({ commodity, quantity }, info)} but must add up to ${formatAmount(
-            { commodity, quantity: 0 },
-            info,
-          )}.`,
-        );
-      }
+      lineErrors.push(
+        `Amounts add up to ${formatAmount({ commodity, quantity }, info)} but must add up to ${formatAmount(
+          { commodity, quantity: 0 },
+          info,
+        )}.`,
+      );
     }
   }
 
@@ -558,8 +573,12 @@ const lineToPosting = (line: Line): EnhancedExpenseLine => {
   const quantity = parseTyped(line.amount);
   const original = line.original;
   const sameCommodity = original && original.currency === line.currency;
+  // Prices and lots only make sense with an amount; a balance assignment
+  // (`= $500`) is kept while the amount stays empty.
   const annotations =
-    sameCommodity && original?.annotations && quantity !== undefined
+    sameCommodity &&
+    original?.annotations &&
+    (quantity !== undefined || isAssignment(line))
       ? original.annotations
       : undefined;
   return {
@@ -678,7 +697,17 @@ export const seedFirstLine = (
   if (!first || values.total.trim() === '') {
     return values;
   }
-  if (first.amount !== '' && first.amount !== previousSeed) {
+  if (first.amount === '') {
+    // An empty line loaded from the file (a balancing line or a balance
+    // assignment) stays empty, and so does an empty line that balances other
+    // lines that already have amounts.
+    if (
+      first.original ||
+      values.lines.some((line, i) => i > 0 && line.amount.trim() !== '')
+    ) {
+      return values;
+    }
+  } else if (first.amount !== previousSeed) {
     return values;
   }
   const lines = values.lines.map((line, i) => {

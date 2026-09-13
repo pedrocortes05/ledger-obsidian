@@ -111,6 +111,19 @@ test('commodityOptions() puts the default first', () => {
 });
 
 describe('autofillFromPayee()', () => {
+  test('keeps a total and commodity the user already chose', () => {
+    const result = autofillFromPayee(
+      newValues({ total: '25.00', currency: 'EUR' }),
+      'spotify',
+      ctx('new'),
+      { total: true, currency: true },
+    );
+    expect(result?.values.total).toEqual('25.00');
+    expect(result?.values.currency).toEqual('EUR');
+    expect(result?.sourceTotal).toEqual('129.00');
+    expect(result?.values.lines[0].amount).toEqual('129.00');
+  });
+
   test('copies accounts, amounts, currency and budget lines', () => {
     const result = autofillFromPayee(newValues(), 'star market', ctx('new'));
     expect(result?.source.value.date).toEqual('2026/09/05');
@@ -199,6 +212,24 @@ describe('validateValues()', () => {
     expect(errors).toEqual({});
   });
 
+  test('an unbalanced commodity is caught when another cancels out', () => {
+    const errors = validateValues(
+      newValues({
+        payee: 'A',
+        lines: lines(
+          ['e:a', '10'],
+          ['a:c', '-5'],
+          ['a:y', '5', 'EUR'],
+          ['a:y', '-5', 'EUR'],
+        ),
+      }),
+      ctx('new'),
+    );
+    expect(errors.lines).toEqual(
+      'Amounts add up to $5.00 but must add up to $0.00.',
+    );
+  });
+
   test('unbalanced amounts use the commodity style', () => {
     const errors = validateValues(
       newValues({ payee: 'A', lines: lines(['e:a', '10'], ['a:c', '-9']) }),
@@ -259,6 +290,42 @@ test('balancingAmount()', () => {
   expect(balancingAmount(values, 1, txCache)).toBeUndefined();
 });
 
+test('seedFirstLine() leaves an empty balancing first line alone', () => {
+  const cache = parse(
+    '2026/09/01 A\n    Assets:Checking\n    Expenses:Food    $10.00',
+    settings,
+  );
+  const editCtx: FormContext = {
+    operation: 'modify',
+    settings,
+    txCache: cache,
+    initialState: cache.transactions[0],
+  };
+  const { values } = initialValues(editCtx);
+  expect(values.total).toEqual('10.00');
+  const seeded = seedFirstLine(values, undefined);
+  expect(seeded.lines.map((l) => l.amount)).toEqual(['', '10.00']);
+  expect(validateValues(seeded, editCtx)).toEqual({});
+});
+
+test('seedFirstLine() does not fill a balance assignment line', () => {
+  const cache = parse(
+    '2024/08/30 Interest\n    Assets:Smart Cash    = $86.27\n    Income:Interest',
+    settings,
+  );
+  const editCtx: FormContext = {
+    operation: 'modify',
+    settings,
+    txCache: cache,
+    initialState: cache.transactions[0],
+  };
+  const { values, leadingComments } = initialValues(editCtx);
+  const seeded = seedFirstLine({ ...values, total: '99.95' }, undefined);
+  expect(buildTransactionText(seeded, editCtx, leadingComments)).toEqual(
+    cache.transactions[0].block.block,
+  );
+});
+
 test('seedFirstLine() only overwrites a seeded or empty first line', () => {
   const values = newValues({ total: '50.00', currency: 'USD' });
   const seeded = seedFirstLine(values, undefined);
@@ -289,6 +356,38 @@ test('splitVirtual()', () => {
 });
 
 describe('buildTransactionText()', () => {
+  test('editing a balance assignment line keeps the assignment', () => {
+    const cache = parse(
+      `2026/09/01 Reconcile
+    Assets:Checking    = $500.00
+    Equity:Adjustment`,
+      settings,
+    );
+    const editCtx: FormContext = {
+      operation: 'modify',
+      settings,
+      txCache: cache,
+      initialState: cache.transactions[0],
+    };
+    const { values, leadingComments } = initialValues(editCtx);
+    values.lines[0] = {
+      ...values.lines[0],
+      account: 'Assets:Banking:Checking',
+      comment: 'reconciled',
+    };
+    expect(validateValues(values, editCtx)).toEqual({});
+    const text = buildTransactionText(values, editCtx, leadingComments);
+    expect(text).toEqual(`2026/09/01 Reconcile
+    Assets:Banking:Checking    = $500.00  ; reconciled
+    Equity:Adjustment`);
+    expect(parse(text, settings).parsingErrors).toEqual([]);
+
+    // Changing the commodity turns it into a normal empty line, and
+    // validation then sees two empty lines.
+    values.lines[0] = { ...values.lines[0], currency: 'USD' };
+    expect(validateValues(values, editCtx).lines).toMatch(/Only one line/);
+  });
+
   test('unchanged edit reproduces the original block', () => {
     [1, 3, 4].forEach((index) => {
       const { values, leadingComments } = initialValues(ctx('modify', index));
