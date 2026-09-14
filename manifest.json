@@ -5,7 +5,7 @@
   "authorUrl": "https://github.com/pedrocortes05/ledger-obsidian",
   "description": "Plain text accounting with Ledger: quick entry, multi-commodity dashboard, budgets.",
   "isDesktopOnly": false,
-  "version": "0.4.2",
+  "version": "0.4.3",
   "minAppVersion": "1.5.7",
   "js": "main.js"
 }
