@@ -1,6 +1,7 @@
 import { getTransactionCache, LedgerModifier } from './file-interface';
 import type LedgerPlugin from './main';
 import { TransactionCache } from './parser';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 import { LedgerDashboard } from './ui/LedgerDashboard';
 import {
   debounce,
@@ -95,13 +96,18 @@ export class LedgerView extends FileView {
       file,
       () => this.txCache ?? this.plugin.txCache,
     );
-    this.txCache = this.isDefaultFile(file)
-      ? this.plugin.txCache
-      : await getTransactionCache(
-          this.plugin.app.vault,
-          this.plugin.settings,
-          file.path,
-        );
+    try {
+      this.txCache = this.isDefaultFile(file)
+        ? this.plugin.txCache
+        : await getTransactionCache(
+            this.plugin.app.vault,
+            this.plugin.settings,
+            file.path,
+          );
+    } catch (error) {
+      this.showError(error);
+      return;
+    }
     this.redraw();
   }
 
@@ -119,17 +125,39 @@ export class LedgerView extends FileView {
       return;
     }
 
-    ReactDOM.render(
-      React.createElement(LedgerDashboard, {
-        tutorialIndex: this.plugin.settings.tutorialIndex,
-        setTutorialIndex: this.setTutorialIndex,
-        settings: this.plugin.settings,
-        txCache: this.txCache,
-        updater: this.updateInterface,
-      }),
-      this.contentEl,
-    );
+    try {
+      ReactDOM.render(
+        React.createElement(
+          ErrorBoundary,
+          { context: 'dashboard' },
+          React.createElement(LedgerDashboard, {
+            tutorialIndex: this.plugin.settings.tutorialIndex,
+            setTutorialIndex: this.setTutorialIndex,
+            settings: this.plugin.settings,
+            txCache: this.txCache,
+            updater: this.updateInterface,
+          }),
+        ),
+        this.contentEl,
+      );
+    } catch (error) {
+      this.showError(error);
+    }
   };
+
+  private showError(error: unknown): void {
+    console.error('ledger: failed to show the dashboard', error);
+    ReactDOM.unmountComponentAtNode(this.contentEl);
+    this.contentEl.empty();
+    const panel = this.contentEl.createDiv({ cls: 'ledger-error-panel' });
+    panel.createEl('h3', { text: 'The Ledger dashboard could not be opened' });
+    panel.createEl('pre', {
+      text:
+        error instanceof Error
+          ? `${error.name}: ${error.message}\n${error.stack ?? ''}`
+          : String(error),
+    });
+  }
 
   private isDefaultFile(file: TFile): boolean {
     return file.path === this.plugin.settings.ledgerFile;

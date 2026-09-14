@@ -17,6 +17,8 @@ import {
   TFile,
 } from 'obsidian';
 
+const CONFLICTING_PLUGIN_ID = 'ledger-obsidian';
+
 declare global {
   interface Window {
     moment: typeof MomentType;
@@ -50,9 +52,6 @@ export default class LedgerPlugin extends Plugin {
     );
 
     this.registerObsidianProtocolHandler('ledger', this.handleProtocolAction);
-
-    this.registerView(LedgerViewType, (leaf) => new LedgerView(leaf, this));
-    this.registerExtensions(['ledger'], LedgerViewType);
 
     this.registerEvent(
       this.app.vault.on('modify', (file: TAbstractFile) => {
@@ -138,7 +137,12 @@ export default class LedgerPlugin extends Plugin {
       },
     });
 
+    // Registered last: if another plugin already owns the view type or the
+    // .ledger extension this throws, and everything above keeps working.
+    this.registerDashboard();
+
     this.app.workspace.onLayoutReady(() => {
+      this.warnAboutConflictingPlugins();
       this.updateTransactionCache();
     });
   }
@@ -194,6 +198,35 @@ export default class LedgerPlugin extends Plugin {
   public async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
     await this.updateTransactionCache();
+  }
+
+  private registerDashboard(): void {
+    try {
+      this.registerView(LedgerViewType, (leaf) => new LedgerView(leaf, this));
+      this.registerExtensions(['ledger'], LedgerViewType);
+    } catch (error) {
+      console.error('ledger: failed to register the dashboard', error);
+      new Notice(
+        'Ledger Pedro could not register the dashboard because another plugin already handles .ledger files. Disable the original "Ledger" plugin and restart Obsidian.',
+        0,
+      );
+    }
+  }
+
+  /**
+   * warnAboutConflictingPlugins detects the original Ledger plugin, which
+   * registers the same view type and file extension.
+   */
+  private warnAboutConflictingPlugins(): void {
+    const plugins = (
+      this.app as unknown as { plugins?: { enabledPlugins?: Set<string> } }
+    ).plugins;
+    if (plugins?.enabledPlugins?.has(CONFLICTING_PLUGIN_ID)) {
+      new Notice(
+        'Ledger Pedro: the original "Ledger" plugin is also enabled. Both handle .ledger files, so the dashboard may not open. Disable "Ledger" in Settings → Community plugins.',
+        0,
+      );
+    }
   }
 
   private async loadSettings(): Promise<void> {
