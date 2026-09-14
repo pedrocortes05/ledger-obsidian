@@ -25,6 +25,11 @@ export class Modal {
     },
   });
   public titleEl = document.createElement('div');
+  public containerEl = Object.assign(document.createElement('div'), {
+    addClass(this: HTMLElement, cls: string): void {
+      this.classList.add(cls);
+    },
+  });
   public modalEl = Object.assign(document.createElement('div'), {
     addClass: (): void => undefined,
   });

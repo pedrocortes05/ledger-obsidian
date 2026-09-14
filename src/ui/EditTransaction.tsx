@@ -110,14 +110,6 @@ const FormStyles = styled.div`
     padding: 10px 15px;
     border-radius: 4px;
   }
-
-  .is-mobile & .ledger-row {
-    flex-wrap: wrap;
-  }
-
-  .is-mobile & .ledger-amount {
-    flex-basis: 100%;
-  }
 `;
 
 const typeOptions: [TxType, string][] = [
