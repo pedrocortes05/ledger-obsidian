@@ -1,6 +1,7 @@
-import { formatAmount, formatAmountMap } from '../amounts';
+import { AmountMap, formatAmount } from '../amounts';
 import {
   BalanceHistory,
+  commoditiesUsed,
   makeAccountSeries,
   makeNetWorthSeries,
   netWorthAt,
@@ -38,11 +39,128 @@ const ChartStyles = styled.div`
     padding: 0;
   }
 
-  .ledger-subtitle {
+  .ledger-summary {
+    margin: 4px 0 12px;
+  }
+
+  .ledger-summary-value {
+    font-size: 1.6em;
+    font-weight: var(--font-semibold, 600);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+  }
+
+  .ledger-summary-label {
     color: var(--text-muted);
-    margin: 0 0 8px;
+    font-size: var(--font-ui-small);
+  }
+
+  .ledger-summary-others {
+    margin-top: 4px;
+    font-size: var(--font-ui-small);
+  }
+
+  .ledger-summary-others summary {
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .ledger-summary-others ul {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
+    max-width: 420px;
+  }
+
+  .ledger-summary-others li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--background-modifier-border);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ledger-summary-others li.ledger-clickable {
+    cursor: pointer;
+  }
+
+  .ledger-summary-chart-hint {
+    color: var(--text-accent);
+    font-size: var(--font-ui-smaller);
   }
 `;
+
+const formatDate = (dateISO: string): string =>
+  window.moment(dateISO, 'YYYY-MM-DD').format('MMM D, YYYY');
+
+/**
+ * AmountSummary shows the amount in the selected commodity prominently and
+ * lists any other commodities in a collapsed section, instead of one long
+ * comma-separated line.
+ */
+export const AmountSummary: React.FC<{
+  label: string;
+  amounts: AmountMap;
+  commodity: string;
+  txCache: TransactionCache;
+  detail?: string;
+  /** Commodities that can be charted; clicking one selects it. */
+  selectable?: string[];
+  onSelectCommodity?: (commodity: string) => void;
+}> = (props): JSX.Element => {
+  const format = (commodity: string): string =>
+    formatAmount(
+      { commodity, quantity: props.amounts.get(commodity) || 0 },
+      props.txCache.commodityMap.get(commodity),
+    );
+  const others = commoditiesUsed(
+    [props.amounts],
+    props.txCache.commodities,
+  ).filter((commodity) => commodity !== props.commodity);
+  return (
+    <div className="ledger-summary">
+      <div className="ledger-summary-value">{format(props.commodity)}</div>
+      <div className="ledger-summary-label">
+        {props.label}
+        {props.detail ? ` · ${props.detail}` : ''}
+      </div>
+      {others.length > 0 ? (
+        <details className="ledger-summary-others">
+          <summary>
+            {others.length === 1
+              ? '1 other commodity'
+              : `${others.length} other commodities`}
+          </summary>
+          <ul>
+            {others.map((commodity) => {
+              const selectable =
+                !!props.onSelectCommodity &&
+                (props.selectable ?? []).includes(commodity);
+              return (
+                <li
+                  key={commodity}
+                  className={selectable ? 'ledger-clickable' : ''}
+                  title={
+                    selectable ? 'Show this commodity in the chart' : undefined
+                  }
+                  onClick={() =>
+                    selectable && props.onSelectCommodity?.(commodity)
+                  }
+                >
+                  <span>{format(commodity)}</span>
+                  {selectable ? (
+                    <span className="ledger-summary-chart-hint">Chart</span>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+};
 
 /**
  * CommoditySelector picks which commodity charts are drawn in. Commodities are
@@ -75,9 +193,15 @@ interface LabelOptions {
   };
 }
 
-const labelOptions = (buckets: Bucket[], interval: Interval): LabelOptions => {
+const labelOptions = (
+  buckets: Bucket[],
+  interval: Interval,
+  compact?: boolean,
+): LabelOptions => {
   const labels = buckets.map((bucket) => formatBucketLabel(bucket, interval));
-  const every = Math.max(1, Math.ceil(labels.length / 12));
+  // Narrow screens fit about five labels without overlapping.
+  const maxLabels = compact ? 5 : 12;
+  const every = Math.max(1, Math.ceil(labels.length / maxLabels));
   return {
     labels,
     axisX: {
@@ -97,9 +221,13 @@ export const NetWorthChart: React.FC<{
   commodities: string[];
   setCommodity: (commodity: string) => void;
   endISO: string;
-  height?: string;
+  compact?: boolean;
 }> = (props): JSX.Element => {
-  const { labels, axisX } = labelOptions(props.buckets, props.interval);
+  const { labels, axisX } = labelOptions(
+    props.buckets,
+    props.interval,
+    props.compact,
+  );
   const series = React.useMemo(
     () => [
       makeNetWorthSeries(
@@ -113,7 +241,7 @@ export const NetWorthChart: React.FC<{
   );
   const totals = netWorthAt(props.history, props.settings, props.endISO);
   const options: ILineChartOptions = {
-    height: props.height ?? '300px',
+    height: props.compact ? '220px' : '300px',
     width: '100%',
     showArea: true,
     showPoint: props.buckets.length <= 60,
@@ -132,10 +260,14 @@ export const NetWorthChart: React.FC<{
           />
         </div>
       </div>
-      <p className="ledger-subtitle">
-        Assets minus liabilities on {props.endISO}:{' '}
-        {formatAmountMap(totals, props.txCache.commodityMap)}
-      </p>
+      <AmountSummary
+        label={`Assets minus liabilities on ${formatDate(props.endISO)}`}
+        amounts={totals}
+        commodity={props.commodity}
+        txCache={props.txCache}
+        selectable={props.commodities}
+        onSelectCommodity={props.setCommodity}
+      />
       <ChartistGraph data={{ labels, series }} options={options} type="Line" />
     </ChartStyles>
   );
@@ -153,7 +285,7 @@ export const AccountChart: React.FC<{
   endISO: string;
   startISO: string;
   isFlowAccount: boolean;
-  height?: string;
+  compact?: boolean;
 }> = (props): JSX.Element => {
   // Expenses and income are more useful as change per period, balance sheet
   // accounts as balances.
@@ -165,7 +297,11 @@ export const AccountChart: React.FC<{
   }, [props.isFlowAccount]);
 
   const accounts = removeDuplicateAccounts(props.selectedAccounts);
-  const { labels, axisX } = labelOptions(props.buckets, props.interval);
+  const { labels, axisX } = labelOptions(
+    props.buckets,
+    props.interval,
+    props.compact,
+  );
   const series = React.useMemo(
     () =>
       accounts.map((account) =>
@@ -180,14 +316,15 @@ export const AccountChart: React.FC<{
     [props.history, accounts.join('|'), props.buckets, props.commodity, mode],
   );
 
+  const height = props.compact ? '220px' : '300px';
   const lineOptions: ILineChartOptions = {
-    height: props.height ?? '300px',
+    height,
     width: '100%',
     showPoint: props.buckets.length <= 60,
     axisX,
   };
   const barOptions: IBarChartOptions = {
-    height: props.height ?? '300px',
+    height,
     width: '100%',
     axisX,
   };
@@ -226,12 +363,24 @@ export const AccountChart: React.FC<{
           props.startISO,
           props.endISO,
         );
+        const changeText = formatAmount(
+          {
+            commodity: props.commodity,
+            quantity: change.get(props.commodity) || 0,
+          },
+          props.txCache.commodityMap.get(props.commodity),
+        );
         return (
-          <p key={account} className="ledger-subtitle">
-            {account}: balance{' '}
-            {formatAmountMap(balance, props.txCache.commodityMap)} · change{' '}
-            {formatAmountMap(change, props.txCache.commodityMap)}
-          </p>
+          <AmountSummary
+            key={account}
+            label={`${account} on ${formatDate(props.endISO)}`}
+            detail={`change ${changeText}`}
+            amounts={balance}
+            commodity={props.commodity}
+            txCache={props.txCache}
+            selectable={props.commodities}
+            onSelectCommodity={props.setCommodity}
+          />
         );
       })}
       {mode === 'balance' ? (

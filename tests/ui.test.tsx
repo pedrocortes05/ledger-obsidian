@@ -102,6 +102,25 @@ describe.each([false, true])('LedgerDashboard (mobile: %s)', (mobile) => {
     expect(container.textContent).toContain('Net worth');
     expect(container.textContent).toContain('Groceries');
 
+    // The selected commodity is the headline; others are listed separately.
+    const summaryValue = (): string | null | undefined =>
+      container.querySelector('.ledger-summary-value')?.textContent;
+    expect(summaryValue()).toEqual('$750.00');
+    expect(
+      container.querySelector('.ledger-summary-others summary')?.textContent,
+    ).toEqual('1 other commodity');
+    click(container.querySelector('.ledger-summary-others li'));
+    expect(summaryValue()).toEqual('20.00 USD');
+    expect(
+      (
+        container.querySelector(
+          'select[aria-label="Commodity"]',
+        ) as HTMLSelectElement
+      ).value,
+    ).toEqual('USD');
+    click(container.querySelector('.ledger-summary-others li'));
+    expect(summaryValue()).toEqual('$750.00');
+
     click(buttonWithText('Budgets'));
     expect(container.textContent).toContain('Budget:Trip');
 
@@ -121,9 +140,9 @@ describe.each([false, true])('LedgerDashboard (mobile: %s)', (mobile) => {
       ...container.querySelectorAll('.ledger-account-name'),
     ].find((el) => el.textContent === 'Checking');
     click(account);
-    expect(container.textContent).toContain(
-      'Assets:Checking: balance $1000.00, 20.00 USD',
-    );
+    expect(summaryValue()).toEqual('$1000.00');
+    expect(container.textContent).toContain('change $1000.00');
+    expect(container.textContent).toContain('1 other commodity');
 
     // Switching to an empty range must not crash (hooks order).
     const preset = container.querySelector(
