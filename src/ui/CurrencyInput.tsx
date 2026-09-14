@@ -8,14 +8,21 @@ const Wrapper = styled.div`
   align-items: stretch;
 
   input {
-    flex-grow: 1;
-    min-width: 0;
+    flex: 1 1 auto;
+    min-width: 4em;
     text-align: right;
   }
 
   select {
-    flex-shrink: 0;
-    max-width: 9em;
+    flex: 0 0 auto;
+    width: 6.5em;
+    text-overflow: ellipsis;
+  }
+
+  .ledger-sign-toggle {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 0 10px;
   }
 `;
 
@@ -40,6 +47,15 @@ export const normalizeAmountInput = (
   }
   const withDot = trimmed.includes('.') ? trimmed : `${trimmed}.`;
   return withDot.padEnd(withDot.length + minDecimals - decimals, '0');
+};
+
+/**
+ * toggleSign flips the sign of a typed amount. Mobile number keypads often
+ * have no minus key.
+ */
+export const toggleSign = (text: string): string => {
+  const trimmed = text.trim();
+  return trimmed.startsWith('-') ? trimmed.slice(1) : `-${trimmed}`;
 };
 
 export const CurrencyInput: React.FC<{
@@ -77,6 +93,18 @@ export const CurrencyInput: React.FC<{
           }
         }}
       />
+      <button
+        type="button"
+        className="ledger-sign-toggle"
+        aria-label="Toggle negative"
+        title="Toggle negative"
+        // Keep the focus (and the keyboard) on the amount field.
+        onPointerDown={(e) => e.preventDefault()}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => props.onAmountChange(toggleSign(props.amount))}
+      >
+        ±
+      </button>
       {customizing ? (
         <input
           type="text"

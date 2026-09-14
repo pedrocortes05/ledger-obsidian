@@ -12,15 +12,50 @@ Transaction Entry Modal
   overflow-y: auto;
 }
 
+/* The ± button is only needed where the number keypad has no minus key. */
+body:not(.is-mobile) .ledger-sign-toggle {
+  display: none;
+}
+
+/* On phones the modal sits at the top and shrinks above the keyboard. */
+.is-mobile .modal-container.ledger-modal-container {
+  align-items: flex-start !important;
+}
+
+.is-mobile .ledger-modal {
+  width: 100%;
+  margin-top: calc(env(safe-area-inset-top, 0px) + 8px) !important;
+  max-height: var(--ledger-viewport-height, 85vh) !important;
+  overflow-y: auto;
+}
+
+/* Stack fields so the amount input gets the full width. */
+.is-mobile .ledger-modal .ledger-row {
+  flex-wrap: wrap;
+}
+
+.is-mobile .ledger-modal .ledger-grow {
+  flex: 1 1 100%;
+}
+
+.is-mobile .ledger-modal .ledger-amount {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* 16px or more keeps iOS from zooming into focused fields. */
 .is-mobile .ledger-modal input[type='text'],
-.is-mobile .ledger-modal input[type='date'] {
+.is-mobile .ledger-modal input[type='date'],
+.is-mobile .ledger-modal select {
   padding: 8px 12px;
   height: auto;
+  min-height: 42px;
   font-size: 17px;
 }
 
 .is-mobile .ledger-modal button {
   margin: 4px 0;
+  min-height: 42px;
 }
 
 /*
@@ -1327,4 +1362,21 @@ tr.introjs-showElement > th {
   left: -18px;
   z-index: 1;
   opacity: 0;
+}
+
+/*
+Errors
+*/
+
+.ledger-error-panel {
+  padding: 12px;
+  color: var(--text-normal);
+}
+
+.ledger-error-panel pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--background-secondary);
+  padding: 8px;
+  font-size: var(--font-ui-smaller);
 }

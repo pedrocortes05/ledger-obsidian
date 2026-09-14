@@ -4,7 +4,8 @@ import { EnhancedTransaction } from './parser';
 import { TransactionPrefill } from './prefill';
 import { emptyTransaction } from './transaction-utils';
 import { EditTransaction } from './ui/EditTransaction';
-import { App, Modal, Setting } from 'obsidian';
+import { ErrorBoundary } from './ui/ErrorBoundary';
+import { App, Modal, Platform, Setting } from 'obsidian';
 import React from 'react';
 import ReactDOM from 'react-dom';
 
@@ -16,6 +17,7 @@ export class AddExpenseModal extends Modal {
   private readonly operation: Operation;
   private readonly initialState: EnhancedTransaction;
   private readonly prefill?: TransactionPrefill;
+  private removeViewportListeners: (() => void) | null = null;
 
   constructor(
     plugin: LedgerPlugin,
@@ -34,25 +36,71 @@ export class AddExpenseModal extends Modal {
 
   public onOpen(): void {
     this.modalEl.addClass('ledger-modal');
+    if (Platform.isMobile) {
+      this.keepAboveKeyboard();
+    }
     ReactDOM.render(
-      React.createElement(EditTransaction, {
-        displayFileWarning:
-          !this.plugin.settings.ledgerFile.endsWith('.ledger'),
-        settings: this.plugin.settings,
-        initialState: this.initialState,
-        operation: this.operation,
-        prefill: this.prefill,
-        updater: this.updater,
-        txCache: this.updater.getTxCache(),
-        close: () => this.close(),
-      }),
+      React.createElement(
+        ErrorBoundary,
+        { context: 'form' },
+        React.createElement(EditTransaction, {
+          displayFileWarning:
+            !this.plugin.settings.ledgerFile.endsWith('.ledger'),
+          settings: this.plugin.settings,
+          initialState: this.initialState,
+          operation: this.operation,
+          prefill: this.prefill,
+          updater: this.updater,
+          txCache: this.updater.getTxCache(),
+          close: () => this.close(),
+        }),
+      ),
       this.contentEl,
     );
   }
 
   public onClose(): void {
+    this.removeViewportListeners?.();
+    this.removeViewportListeners = null;
     ReactDOM.unmountComponentAtNode(this.contentEl);
     this.contentEl.empty();
+  }
+
+  /**
+   * keepAboveKeyboard pins the modal to the top of the screen, limits its
+   * height to the area not covered by the on-screen keyboard and scrolls the
+   * focused field into view.
+   */
+  private keepAboveKeyboard(): void {
+    this.containerEl.addClass('ledger-modal-container');
+    const viewport = window.visualViewport;
+    const scrollFocused = (): void => {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && this.modalEl.contains(active)) {
+        active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    };
+    const update = (): void => {
+      const height = viewport ? viewport.height : window.innerHeight;
+      this.modalEl.style.setProperty(
+        '--ledger-viewport-height',
+        `${Math.max(240, Math.floor(height) - 24)}px`,
+      );
+      scrollFocused();
+    };
+    // The keyboard animates in after focus, so scroll again once it is up.
+    const onFocus = (): void => {
+      window.setTimeout(scrollFocused, 350);
+    };
+    update();
+    viewport?.addEventListener('resize', update);
+    window.addEventListener('resize', update);
+    this.modalEl.addEventListener('focusin', onFocus);
+    this.removeViewportListeners = () => {
+      viewport?.removeEventListener('resize', update);
+      window.removeEventListener('resize', update);
+      this.modalEl.removeEventListener('focusin', onFocus);
+    };
   }
 }
 
