@@ -10,6 +10,7 @@ import {
   tolerance,
 } from './amounts';
 import { Error, TxError } from './error';
+import { Metadata, parseMetadata } from './metadata';
 import { ISettings } from './settings';
 import { Moment } from 'moment';
 
@@ -54,6 +55,17 @@ export interface TransactionCache {
 
   /** Prices declared with `P` directives. */
   prices: PriceDirective[];
+
+  /**
+   * Accounts declared with `assert false`, which ledger-cli refuses to post
+   * to (their sub-accounts are still allowed).
+   */
+  disallowedAccounts: string[];
+
+  /** Metadata keys (including tags) ordered by most recent use. */
+  metadataKeys: string[];
+  /** Values used for each metadata key, most recent first. */
+  metadataValues: Map<string, string[]>;
 }
 
 export type Status = '' | '*' | '!';
@@ -96,6 +108,11 @@ export interface EnhancedExpenseLine {
   /** Balance assertion or assignment (`= X`). */
   assertion?: Amount;
   comment?: string;
+  /**
+   * Metadata and tags from this posting's comment and the comment lines after
+   * it. Use postingMetadata() to include the transaction's metadata.
+   */
+  metadata: Metadata;
 }
 
 export interface Commentline {
@@ -118,6 +135,8 @@ export interface EnhancedTransaction {
     payee: string;
     comment?: string;
     expenselines: (EnhancedExpenseLine | Commentline)[];
+    /** Metadata from the header note and comment lines before the first posting. */
+    metadata: Metadata;
   };
 }
 
@@ -224,6 +243,7 @@ export const parsePostingLine = (
     hasWrittenAmount: false,
     precision: 0,
     comment,
+    metadata: parseMetadata(comment),
   };
 
   if (rest === '') {
@@ -322,6 +342,7 @@ interface RawParse {
   transactions: EnhancedTransaction[];
   aliases: Map<string, string>;
   declaredAccounts: string[];
+  disallowedAccounts: string[];
   declaredCommodities: string[];
   prices: PriceDirective[];
   errors: Error[];
@@ -346,6 +367,7 @@ const parseLines = (fileContents: string): RawParse => {
     transactions: [],
     aliases: new Map(),
     declaredAccounts: [],
+    disallowedAccounts: [],
     declaredCommodities: [],
     prices: [],
     errors: [],
@@ -400,9 +422,21 @@ const parseLines = (fileContents: string): RawParse => {
 
     const account = /^account\s+(.+)$/.exec(line);
     if (account) {
-      result.declaredAccounts.push(splitComment(account[1])[0].trim());
+      const name = splitComment(account[1])[0].trim();
+      result.declaredAccounts.push(name);
       i++;
-      skipIndented();
+      while (i < lines.length && isIndented(lines[i]) && !isBlank(lines[i])) {
+        const [subDirective] = splitComment(lines[i].trim());
+        const assertion = /^assert\s+(.+)$/.exec(subDirective);
+        if (assertion && assertion[1].trim() === 'false') {
+          result.disallowedAccounts.push(name);
+        }
+        const accountAlias = /^alias\s+(.+)$/.exec(subDirective);
+        if (accountAlias) {
+          result.aliases.set(accountAlias[1].trim(), name);
+        }
+        i++;
+      }
       continue;
     }
 
@@ -526,18 +560,25 @@ const parseTransaction = (
       payee: payee.trim(),
       comment,
       expenselines: [],
+      metadata: parseMetadata(comment),
     },
   };
+  let lastPosting: EnhancedExpenseLine | undefined;
 
   for (let j = start + 1; j < i; j++) {
     const raw = lines[j];
     const trimmed = raw.trim();
     if (/^[;#%|]/.test(trimmed)) {
+      const commentText = trimmed.slice(1).trim();
       tx.value.expenselines.push({
         line: j,
         raw,
-        comment: trimmed.slice(1).trim(),
+        comment: commentText,
       });
+      Object.assign(
+        lastPosting ? lastPosting.metadata : tx.value.metadata,
+        parseMetadata(commentText),
+      );
       continue;
     }
     const parsed = parsePostingLine(raw, j);
@@ -549,11 +590,21 @@ const parseTransaction = (
       return i;
     }
     tx.value.expenselines.push(parsed.posting);
+    lastPosting = parsed.posting;
   }
 
   result.transactions.push(tx);
   return i;
 };
+
+/**
+ * postingMetadata returns the metadata that applies to a posting: the
+ * transaction's metadata overridden by the posting's own, like ledger-cli.
+ */
+export const postingMetadata = (
+  tx: EnhancedTransaction,
+  posting: EnhancedExpenseLine,
+): Metadata => ({ ...tx.value.metadata, ...posting.metadata });
 
 export const getPostings = (tx: EnhancedTransaction): EnhancedExpenseLine[] =>
   tx.value.expenselines.filter(
@@ -881,6 +932,54 @@ export const parse = (
   );
   const transactions = computeAmounts(raw.transactions, commodityMap, errors);
 
+  const disallowedAccounts = [
+    ...new Set(
+      raw.disallowedAccounts.map((account) =>
+        dealiasAccount(account, raw.aliases),
+      ),
+    ),
+  ];
+  if (disallowedAccounts.length > 0) {
+    transactions.forEach((tx) =>
+      getPostings(tx)
+        .filter((posting) =>
+          disallowedAccounts.includes(posting.dealiasedAccount),
+        )
+        .forEach((posting) =>
+          errors.push({
+            message: `${posting.dealiasedAccount} does not accept postings (assert false); ledger-cli will reject this transaction`,
+            transaction: tx,
+          }),
+        ),
+    );
+  }
+
+  const metadataStats = new Map<string, UsageStats>();
+  const valueStats = new Map<string, Map<string, UsageStats>>();
+  transactions.forEach((tx, index) => {
+    const collect = (metadata: Metadata): void =>
+      Object.entries(metadata).forEach(([key, value]) => {
+        recordUsage(metadataStats, key, key, tx.value.dateISO, index);
+        if (value !== '') {
+          let values = valueStats.get(key);
+          if (!values) {
+            values = new Map();
+            valueStats.set(key, values);
+          }
+          recordUsage(values, value, value, tx.value.dateISO, index);
+        }
+      });
+    collect(tx.value.metadata);
+    getPostings(tx).forEach((posting) => collect(posting.metadata));
+  });
+  const metadataValues = new Map<string, string[]>();
+  valueStats.forEach((values, key) =>
+    metadataValues.set(
+      key,
+      [...values.values()].sort(byRecency).map((s) => s.display),
+    ),
+  );
+
   const payeeStats = new Map<string, UsageStats>();
   const accountStats = new Map<string, UsageStats>();
   const virtualAccounts = new Set<string>();
@@ -965,5 +1064,10 @@ export const parse = (
     commodities,
     commodityMap,
     prices: raw.prices,
+    disallowedAccounts,
+    metadataKeys: [...metadataStats.values()]
+      .sort(byRecency)
+      .map((s) => s.display),
+    metadataValues,
   };
 };

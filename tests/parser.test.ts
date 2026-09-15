@@ -3,6 +3,7 @@ import {
   getPostings,
   parse,
   parsePostingLine,
+  postingMetadata,
 } from '../src/parser';
 import { settingsWithDefaults } from '../src/settings';
 
@@ -414,5 +415,82 @@ end comment
       precision: 3,
     });
     expect(cache.commodities[0].symbol).toEqual('$');
+  });
+});
+
+describe('metadata', () => {
+  const cache = parse(
+    `2026/08/23 Causartt · 26ª edición  ; :event:
+    ; Edition: 26
+    Assets:Loans:Causartt:Fees    $10,000.00
+    ; Edition: 27
+    Income:Causartt
+
+2026/09/14 ABONO SPEI Causartt
+    Assets:Banking:Checking    $4,000.00
+    Assets:Loans:Causartt:Fees    -$1,207.98  ; Edition: 26
+    Assets:Loans:Causartt:Servers    -$2,792.02`,
+    settings,
+  );
+
+  test('transaction metadata comes from the note and lines before postings', () => {
+    expect(cache.transactions[0].value.metadata).toEqual({
+      event: '',
+      Edition: '26',
+    });
+  });
+
+  test('posting metadata comes from its comment and the lines after it', () => {
+    const [fees, income] = getPostings(cache.transactions[0]);
+    expect(fees.metadata).toEqual({ Edition: '27' });
+    expect(income.metadata).toEqual({});
+    expect(postingMetadata(cache.transactions[0], income)).toEqual({
+      event: '',
+      Edition: '26',
+    });
+    expect(postingMetadata(cache.transactions[0], fees).Edition).toEqual('27');
+    expect(getPostings(cache.transactions[1])[1].metadata).toEqual({
+      Edition: '26',
+    });
+  });
+
+  test('keys and values are collected by recency', () => {
+    expect(cache.metadataKeys).toEqual(['Edition', 'event']);
+    expect(cache.metadataValues.get('Edition')).toEqual(['26', '27']);
+  });
+});
+
+describe('account assert false', () => {
+  test('postings to the guarded account are reported, sub-accounts are fine', () => {
+    const cache = parse(
+      `alias l=Assets:Loans
+account Assets:Loans:Causartt
+    ; guard
+    assert false  ; no postings to the parent
+    alias causartt
+
+2026/09/01 Ok
+    l:Causartt:Fees    $10
+    Income:Causartt
+
+2026/09/02 Wrong
+    causartt    $5
+    Income:Causartt`,
+      settings,
+    );
+    expect(cache.disallowedAccounts).toEqual(['Assets:Loans:Causartt']);
+    expect(cache.parsingErrors.map((e) => e.message)).toEqual([
+      'Assets:Loans:Causartt does not accept postings (assert false); ledger-cli will reject this transaction',
+    ]);
+    expect(cache.transactions).toHaveLength(2);
+  });
+
+  test('other assertions are ignored', () => {
+    const cache = parse(
+      'account Assets:X\n    assert amount > 0\n\n2026/01/01 A\n  Assets:X  $1\n  Equity',
+      settings,
+    );
+    expect(cache.disallowedAccounts).toEqual([]);
+    expect(cache.parsingErrors).toEqual([]);
   });
 });

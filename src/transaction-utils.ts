@@ -26,6 +26,7 @@ export const emptyTransaction: EnhancedTransaction = {
     status: '',
     payee: '',
     expenselines: [],
+    metadata: {},
   },
 };
 
@@ -178,6 +179,20 @@ export const filterByEndDate = (end: Moment | string): Filter => {
   const endISO = toISODate(end);
   return (tx) => tx.value.dateISO <= endISO;
 };
+
+/**
+ * filterByPostings matches transactions with at least one posting for which
+ * the predicate is true.
+ */
+export const filterByPostings =
+  (
+    predicate: (
+      tx: EnhancedTransaction,
+      posting: EnhancedExpenseLine,
+    ) => boolean,
+  ): Filter =>
+  (tx) =>
+    getPostings(tx).some((posting) => predicate(tx, posting));
 
 export const filterByTag =
   (tag: string): Filter =>

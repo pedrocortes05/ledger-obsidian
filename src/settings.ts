@@ -8,6 +8,9 @@ const defaultSettings: ISettings = {
   expenseAccountsPrefix: 'Expenses',
   incomeAccountsPrefix: 'Income',
   liabilityAccountsPrefix: 'Liabilities',
+
+  groupAccount: '',
+  groupKey: '',
 };
 
 export interface ISettings {
@@ -21,6 +24,11 @@ export interface ISettings {
   expenseAccountsPrefix: string;
   incomeAccountsPrefix: string;
   liabilityAccountsPrefix: string;
+
+  /** Account shown in the dashboard's "By tag" view. */
+  groupAccount: string;
+  /** Metadata key the "By tag" view groups by, e.g. "Edition". */
+  groupKey: string;
 }
 
 /**

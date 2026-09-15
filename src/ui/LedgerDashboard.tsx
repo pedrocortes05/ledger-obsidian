@@ -1,5 +1,5 @@
 import { isAccountOrChild } from '../account-utils';
-import { BalanceHistory } from '../balance-utils';
+import { BalanceHistory, PostingPredicate } from '../balance-utils';
 import {
   Bucket,
   DatePreset,
@@ -11,11 +11,16 @@ import {
   toISO,
 } from '../date-utils';
 import { LedgerModifier } from '../file-interface';
-import type { EnhancedTransaction, TransactionCache } from '../parser';
+import { matchesMetadata, MetadataFilter } from '../metadata';
+import {
+  EnhancedTransaction,
+  postingMetadata,
+  TransactionCache,
+} from '../parser';
 import { ISettings } from '../settings';
 import {
-  filterByAccount,
   filterByEndDate,
+  filterByPostings,
   filterByStartDate,
   filterByTag,
   filterTransactions,
@@ -24,6 +29,8 @@ import { AccountsList } from './AccountsList';
 import { BudgetTable } from './BudgetTable';
 import { AccountChart, NetWorthChart } from './Charts';
 import { DateRangeSelector } from './DateRangeSelector';
+import { MetadataFilterBar } from './MetadataFilterBar';
+import { MetadataGroups } from './MetadataGroups';
 import { ParseErrors } from './ParseErrors';
 import { TransactionTable, UNREVIEWED_TAG } from './TransactionList';
 import { Step, Steps } from 'intro.js-react';
@@ -97,7 +104,7 @@ const Layout = styled.div`
   }
 `;
 
-type Tab = 'overview' | 'budgets' | 'unreviewed' | 'accounts';
+type Tab = 'overview' | 'budgets' | 'groups' | 'unreviewed' | 'accounts';
 
 interface DashboardState {
   preset: DatePreset;
@@ -122,6 +129,13 @@ interface DashboardState {
   unreviewed: EnhancedTransaction[];
   selectedTransactions: EnhancedTransaction[];
   isFlowAccount: boolean;
+  filter: MetadataFilter | null;
+  setFilter: (filter: MetadataFilter | null) => void;
+  /** Postings matching the filter, or undefined without a filter. */
+  include?: PostingPredicate;
+  /** Opens an account with a filter; Back clears both. */
+  drillDown: (account: string, filter: MetadataFilter) => void;
+  back: () => void;
 }
 
 /**
@@ -132,6 +146,8 @@ const useDashboardState = (props: {
   settings: ISettings;
   txCache: TransactionCache;
 }): DashboardState => {
+  const [filter, setFilter] = React.useState<MetadataFilter | null>(null);
+  const [filterFromDrillDown, setFilterFromDrillDown] = React.useState(false);
   const { txCache, settings } = props;
   const lastDate = React.useMemo(
     () =>
@@ -196,9 +212,16 @@ const useDashboardState = (props: {
     setEndDate(end);
   };
 
+  const include = React.useMemo<PostingPredicate | undefined>(
+    () =>
+      filter
+        ? (tx, posting) => matchesMetadata(postingMetadata(tx, posting), filter)
+        : undefined,
+    [filter],
+  );
   const history = React.useMemo(
-    () => new BalanceHistory(txCache.transactions),
-    [txCache],
+    () => new BalanceHistory(txCache.transactions, include),
+    [txCache, include],
   );
   const startISO = toISO(startDate);
   const endISO = toISO(endDate);
@@ -206,17 +229,24 @@ const useDashboardState = (props: {
     () => makeBuckets(interval, startDate, endDate),
     [interval, startISO, endISO],
   );
+  const matching = React.useMemo(
+    () =>
+      include
+        ? filterTransactions(txCache.transactions, filterByPostings(include))
+        : txCache.transactions,
+    [txCache, include],
+  );
   const inRange = React.useMemo(
     () =>
       filterTransactions(
-        filterTransactions(txCache.transactions, filterByStartDate(startISO)),
+        filterTransactions(matching, filterByStartDate(startISO)),
         filterByEndDate(endISO),
       ),
-    [txCache, startISO, endISO],
+    [matching, startISO, endISO],
   );
   const unreviewed = React.useMemo(
-    () => filterTransactions(txCache.transactions, filterByTag(UNREVIEWED_TAG)),
-    [txCache],
+    () => filterTransactions(matching, filterByTag(UNREVIEWED_TAG)),
+    [matching],
   );
   const selectedTransactions = React.useMemo(
     () =>
@@ -224,9 +254,18 @@ const useDashboardState = (props: {
         ? []
         : filterTransactions(
             inRange,
-            ...selectedAccounts.map((a) => filterByAccount(a)),
+            // A posting must be to a selected account and match the filter.
+            filterByPostings(
+              (tx, posting) =>
+                selectedAccounts.some(
+                  (a) =>
+                    isAccountOrChild(posting.account, a) ||
+                    isAccountOrChild(posting.dealiasedAccount, a),
+                ) &&
+                (!include || include(tx, posting)),
+            ),
           ),
-    [inRange, selectedAccounts],
+    [inRange, selectedAccounts, include],
   );
   const isFlowAccount = selectedAccounts.some(
     (a) =>
@@ -257,12 +296,32 @@ const useDashboardState = (props: {
     unreviewed,
     selectedTransactions,
     isFlowAccount,
+    filter,
+    setFilter: (newFilter) => {
+      setFilter(newFilter);
+      setFilterFromDrillDown(false);
+    },
+    include,
+    drillDown: (account, newFilter) => {
+      setSelectedAccounts([account]);
+      setFilter(newFilter);
+      setFilterFromDrillDown(true);
+    },
+    back: () => {
+      setSelectedAccounts([]);
+      if (filterFromDrillDown) {
+        setFilter(null);
+        setFilterFromDrillDown(false);
+      }
+    },
   };
 };
 
 interface DashboardProps {
   tutorialIndex: number;
   setTutorialIndex: (index: number) => void;
+  /** Remembers the account and key of the "By tag" view. */
+  setGrouping?: (account: string, key: string) => void;
   settings: ISettings;
   txCache: TransactionCache;
   updater: LedgerModifier;
@@ -303,7 +362,7 @@ const Tabs: React.FC<{
         className={state.tab === tab ? 'mod-cta' : ''}
         onClick={() => {
           state.setTab(tab);
-          state.setSelectedAccounts([]);
+          state.back();
         }}
       >
         {label}
@@ -322,7 +381,7 @@ const SelectedAccounts: React.FC<{
 }> = ({ state, props, mobile }): JSX.Element => (
   <>
     <div className="ledger-selected-accounts">
-      <button onClick={() => state.setSelectedAccounts([])}>← Back</button>
+      <button onClick={state.back}>← Back</button>
     </div>
     <AccountChart
       history={state.history}
@@ -360,9 +419,12 @@ const TabContent: React.FC<{
           txCache={props.txCache}
           startISO={state.startISO}
           endISO={state.endISO}
+          include={state.include}
           onSelectAccount={(account) => state.setSelectedAccounts([account])}
         />
       );
+    case 'groups':
+      return <GroupsTab state={state} props={props} />;
     case 'unreviewed':
       return (
         <TransactionTable
@@ -413,6 +475,30 @@ const TabContent: React.FC<{
   }
 };
 
+const GroupsTab: React.FC<{
+  state: DashboardState;
+  props: DashboardProps;
+}> = ({ state, props }): JSX.Element => {
+  const [grouping, setGrouping] = React.useState({
+    account: props.settings.groupAccount,
+    key: props.settings.groupKey,
+  });
+  return (
+    <MetadataGroups
+      txCache={props.txCache}
+      startISO={state.startISO}
+      endISO={state.endISO}
+      account={grouping.account}
+      metadataKey={grouping.key}
+      setGrouping={(account, key) => {
+        setGrouping({ account, key });
+        props.setGrouping?.(account, key);
+      }}
+      onSelect={state.drillDown}
+    />
+  );
+};
+
 const DesktopDashboard: React.FC<DashboardProps & { state: DashboardState }> = (
   props,
 ): JSX.Element => {
@@ -440,6 +526,12 @@ const DesktopDashboard: React.FC<DashboardProps & { state: DashboardState }> = (
 
       <ParseErrors txCache={props.txCache} />
 
+      <MetadataFilterBar
+        txCache={props.txCache}
+        filter={state.filter}
+        setFilter={state.setFilter}
+      />
+
       <div className="ledger-body">
         <div className="ledger-sidebar">
           <AccountsList
@@ -462,6 +554,7 @@ const DesktopDashboard: React.FC<DashboardProps & { state: DashboardState }> = (
                 tabs={[
                   ['overview', 'Overview'],
                   ['budgets', 'Budgets'],
+                  ['groups', 'By tag'],
                   ['unreviewed', 'Unreviewed'],
                 ]}
               />
@@ -501,6 +594,12 @@ const MobileDashboard: React.FC<DashboardProps & { state: DashboardState }> = (
 
       <ParseErrors txCache={props.txCache} />
 
+      <MetadataFilterBar
+        txCache={props.txCache}
+        filter={state.filter}
+        setFilter={state.setFilter}
+      />
+
       {state.selectedAccounts.length > 0 ? (
         <SelectedAccounts state={state} props={props} mobile />
       ) : (
@@ -511,6 +610,7 @@ const MobileDashboard: React.FC<DashboardProps & { state: DashboardState }> = (
               ['overview', 'Overview'],
               ['accounts', 'Accounts'],
               ['budgets', 'Budgets'],
+              ['groups', 'By tag'],
               ['unreviewed', 'Unreviewed'],
             ]}
           />
