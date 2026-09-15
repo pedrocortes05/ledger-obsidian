@@ -336,7 +336,7 @@ const SelectedAccounts: React.FC<{
       startISO={state.startISO}
       endISO={state.endISO}
       isFlowAccount={state.isFlowAccount}
-      height={mobile ? '200px' : undefined}
+      compact={mobile}
     />
     <TransactionTable
       key={state.selectedAccounts.join('|')}
@@ -398,7 +398,7 @@ const TabContent: React.FC<{
             commodities={state.commodities}
             setCommodity={state.setCommodity}
             endISO={state.endISO}
-            height={mobile ? '200px' : undefined}
+            compact={mobile}
           />
           <h2>Recent transactions</h2>
           <TransactionTable
