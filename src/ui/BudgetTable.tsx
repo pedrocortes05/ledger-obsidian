@@ -1,4 +1,4 @@
-import { makeBudgetRows } from '../balance-utils';
+import { makeBudgetRows, PostingPredicate } from '../balance-utils';
 import { TransactionCache } from '../parser';
 import { formatSigned } from './Charts';
 import React from 'react';
@@ -51,6 +51,7 @@ export const BudgetTable: React.FC<{
   txCache: TransactionCache;
   startISO: string;
   endISO: string;
+  include?: PostingPredicate;
   onSelectAccount: (account: string) => void;
 }> = (props): JSX.Element => {
   const rows = React.useMemo(
@@ -60,8 +61,9 @@ export const BudgetTable: React.FC<{
         props.txCache.virtualAccounts,
         props.startISO,
         props.endISO,
+        props.include,
       ),
-    [props.txCache, props.startISO, props.endISO],
+    [props.txCache, props.startISO, props.endISO, props.include],
   );
 
   if (rows.length === 0) {

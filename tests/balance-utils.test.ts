@@ -2,12 +2,14 @@ import {
   BalanceHistory,
   makeAccountSeries,
   makeBudgetRows,
+  makeMetadataGroups,
   makeNetWorthSeries,
+  metadataKeysByAccount,
   netWorthAt,
   removeDuplicateAccounts,
 } from '../src/balance-utils';
 import { makeBuckets } from '../src/date-utils';
-import { parse } from '../src/parser';
+import { parse, postingMetadata } from '../src/parser';
 import { settingsWithDefaults } from '../src/settings';
 import moment from 'moment';
 
@@ -184,5 +186,85 @@ describe('removeDuplicateAccounts()', () => {
     ];
     const result = removeDuplicateAccounts(input);
     expect(result).toEqual(expected);
+  });
+});
+
+describe('metadata grouping', () => {
+  const tagged = parse(
+    `2026/07/20 Edition 25
+    ; Edition: 25
+    Assets:Loans:Causartt:Fees    $10,000.00
+    Income:Causartt
+
+2026/08/23 Edition 26
+    ; Edition: 26
+    Assets:Loans:Causartt:Fees    $10,000.00
+    Income:Causartt
+
+2026/08/30 Payment
+    Assets:Checking    $10,000.00
+    Assets:Loans:Causartt:Fees    -$10,000.00  ; Edition: 25
+
+2026/09/14 Payment
+    Assets:Checking    $4,000.00
+    Assets:Loans:Causartt:Fees    -$1,207.98  ; Edition: 26
+    Assets:Loans:Causartt:Servers    -$2,792.02`,
+    settings,
+  );
+
+  test('makeMetadataGroups() is like ledger bal --pivot', () => {
+    expect(
+      makeMetadataGroups(
+        tagged.transactions,
+        'Assets:Loans:Causartt',
+        'Edition',
+        '2026-09-01',
+        '2026-09-30',
+      ),
+    ).toEqual([
+      {
+        value: '26',
+        commodity: '$',
+        increases: 0,
+        decreases: 1207.98,
+        balance: 8792.02,
+        lastDate: '2026-09-14',
+      },
+      {
+        value: '25',
+        commodity: '$',
+        increases: 0,
+        decreases: 0,
+        balance: 0,
+        lastDate: '2026-08-30',
+      },
+      {
+        value: null,
+        commodity: '$',
+        increases: 0,
+        decreases: 2792.02,
+        balance: -2792.02,
+        lastDate: '2026-09-14',
+      },
+    ]);
+  });
+
+  test('BalanceHistory can be limited to matching postings', () => {
+    const history = new BalanceHistory(
+      tagged.transactions,
+      (tx, posting) => postingMetadata(tx, posting).Edition === '26',
+    );
+    expect(history.balanceAt('Assets:Loans:Causartt', '2026-09-30')).toEqual(
+      new Map([['$', 8792.02]]),
+    );
+    expect(history.balanceAt('Assets:Checking', '2026-09-30')).toEqual(
+      new Map(),
+    );
+  });
+
+  test('metadataKeysByAccount() includes parent accounts', () => {
+    const keys = metadataKeysByAccount(tagged.transactions);
+    expect([...(keys.get('Assets:Loans') ?? [])]).toEqual(['Edition']);
+    expect(keys.has('Assets:Checking')).toBe(false);
   });
 });

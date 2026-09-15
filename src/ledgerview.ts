@@ -133,6 +133,7 @@ export class LedgerView extends FileView {
           React.createElement(LedgerDashboard, {
             tutorialIndex: this.plugin.settings.tutorialIndex,
             setTutorialIndex: this.setTutorialIndex,
+            setGrouping: this.setGrouping,
             settings: this.plugin.settings,
             txCache: this.txCache,
             updater: this.updateInterface,
@@ -162,6 +163,13 @@ export class LedgerView extends FileView {
   private isDefaultFile(file: TFile): boolean {
     return file.path === this.plugin.settings.ledgerFile;
   }
+
+  private readonly setGrouping = (account: string, key: string): void => {
+    this.plugin.settings.groupAccount = account;
+    this.plugin.settings.groupKey = key;
+    // Only a view preference: save without re-parsing the ledger file.
+    this.plugin.saveData(this.plugin.settings);
+  };
 
   private readonly setTutorialIndex = (index: number): void => {
     this.plugin.settings.tutorialIndex = index;
