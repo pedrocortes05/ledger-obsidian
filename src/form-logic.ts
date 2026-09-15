@@ -2,6 +2,7 @@
  * Logic behind the add/edit transaction form, kept free of React so it can be
  * unit tested.
  */
+import { dealiasAccount } from './account-utils';
 import {
   addToAmountMap,
   AmountMap,
@@ -9,6 +10,14 @@ import {
   formatAmount,
   tolerance,
 } from './amounts';
+import {
+  formatMetadataComment,
+  isMetadataOnly,
+  isValidMetadataKey,
+  nextNumericValue,
+  parseMetadata,
+  stripMetadata,
+} from './metadata';
 import type { Operation } from './modals';
 import {
   Commentline,
@@ -41,6 +50,24 @@ export interface Line {
   trailingComments: Commentline[];
 }
 
+/**
+ * MetaRow is one transaction-level tag (empty value) or `Key: value` entry.
+ */
+export interface MetaRow {
+  id: number;
+  key: string;
+  value: string;
+  /** Line of the comment this row was read from, when editing. */
+  sourceLine?: number;
+  originalKey?: string;
+  originalValue?: string;
+  /** Copied from another transaction without its value; fill it or remove it. */
+  needsValue?: boolean;
+}
+
+/** Tags that describe a transaction's review state and are never copied. */
+const UNCOPIED_TAGS = ['unreviewed'];
+
 export interface Values {
   txType: TxType;
   /** YYYY-MM-DD */
@@ -49,9 +76,11 @@ export interface Values {
   total: string;
   currency: string;
   lines: Line[];
+  metadata: MetaRow[];
 }
 
 export interface ValueErrors {
+  metadata?: string;
   date?: string;
   payee?: string;
   total?: string;
@@ -69,6 +98,53 @@ export interface FormContext {
 }
 
 let nextLineId = 1;
+
+export const makeMetaRow = (overrides: Partial<MetaRow> = {}): MetaRow => ({
+  id: nextLineId++,
+  key: '',
+  value: '',
+  ...overrides,
+});
+
+/**
+ * metadataTemplate copies a transaction's metadata keys for a new transaction:
+ * tags are kept, values are cleared so they have to be filled in again (the
+ * next Edition is not the previous one).
+ */
+export const metadataTemplate = (tx: EnhancedTransaction): MetaRow[] =>
+  Object.entries(tx.value.metadata)
+    .filter(([key, value]) => !(value === '' && UNCOPIED_TAGS.includes(key)))
+    .map(([key, value]) =>
+      makeMetaRow({ key, value: '', needsValue: value !== '' }),
+    );
+
+/**
+ * metadataValueSuggestions lists values used for the key, most recent first,
+ * preceded by the next number for numeric keys like Edition.
+ */
+export const metadataValueSuggestions = (
+  txCache: TransactionCache,
+  key: string,
+): { next?: string; values: string[] } => {
+  const values = txCache.metadataValues.get(key) ?? [];
+  const next = nextNumericValue(values);
+  return { next, values: next ? [next, ...values] : values };
+};
+
+const metadataRowsFromComments = (comments: Commentline[]): MetaRow[] =>
+  comments
+    .filter((line) => isMetadataOnly(line.comment))
+    .flatMap((line) =>
+      Object.entries(parseMetadata(line.comment)).map(([key, value]) =>
+        makeMetaRow({
+          key,
+          value,
+          sourceLine: line.line,
+          originalKey: key,
+          originalValue: value,
+        }),
+      ),
+    );
 
 export const makeLine = (overrides: Partial<Line> = {}): Line => ({
   id: nextLineId++,
@@ -151,7 +227,10 @@ const linesFromTransaction = (
             )
           : '',
         currency: entry.currency,
-        comment: entry.comment || '',
+        // Copies drop tags and metadata from memos (e.g. "Edition: 26").
+        comment: keepOriginal
+          ? entry.comment || ''
+          : stripMetadata(entry.comment || ''),
         virtual: entry.virtual,
         original: keepOriginal ? entry : undefined,
       }),
@@ -236,6 +315,13 @@ export const autofillFromPayee = (
       total: keep.total ? values.total : totals.total,
       currency: keep.currency ? values.currency : totals.currency,
       lines,
+      metadata: [
+        ...values.metadata,
+        ...metadataTemplate(source).filter(
+          (row) =>
+            !values.metadata.some((existing) => existing.key === row.key),
+        ),
+      ],
     },
   };
 };
@@ -272,6 +358,9 @@ export const initialValues = (
         total: totals.total,
         currency: totals.currency || currency,
         lines,
+        metadata: keepOriginal
+          ? metadataRowsFromComments(leadingComments)
+          : metadataTemplate(tx),
       },
     };
   }
@@ -283,6 +372,7 @@ export const initialValues = (
     total: '',
     currency,
     lines: [makeLine({ currency }), makeLine({ currency })],
+    metadata: [],
   };
 
   if (prefill) {
@@ -325,9 +415,13 @@ const unionRanked = (
   txCache: TransactionCache,
 ): string[] => {
   const set = new Set(primary);
+  // Accounts with `assert false` cannot be posted to, so never suggest them.
+  const allowed = txCache.accountsByUsage.filter(
+    (a) => !txCache.disallowedAccounts.includes(a),
+  );
   return [
-    ...txCache.accountsByUsage.filter((a) => set.has(a)),
-    ...txCache.accountsByUsage.filter((a) => !set.has(a)),
+    ...allowed.filter((a) => set.has(a)),
+    ...allowed.filter((a) => !set.has(a)),
   ];
 };
 
@@ -469,6 +563,45 @@ export const validateValues = (
   ) {
     lineErrors.push('Amounts must be numbers.');
   }
+  values.lines.forEach((line) => {
+    const account = dealiasAccount(
+      splitVirtual(line.account, line.virtual).account,
+      ctx.txCache.aliases,
+    );
+    if (ctx.txCache.disallowedAccounts.includes(account)) {
+      const child = ctx.txCache.accounts.find((a) =>
+        a.startsWith(`${account}:`),
+      );
+      lineErrors.push(
+        `${account} does not accept postings (assert false).${
+          child ? ` Use a sub-account such as ${child}.` : ''
+        }`,
+      );
+    }
+  });
+  const metadataErrors: string[] = [];
+  const keys = values.metadata
+    .filter((row) => row.key.trim() !== '' || row.value.trim() !== '')
+    .map((row) => {
+      const key = row.key.trim();
+      if (!isValidMetadataKey(key)) {
+        metadataErrors.push(
+          key === ''
+            ? 'Every value needs a name.'
+            : `"${key}" cannot contain spaces or colons.`,
+        );
+      } else if (row.needsValue && row.value.trim() === '') {
+        metadataErrors.push(`Fill in ${key} or remove it.`);
+      }
+      return key;
+    });
+  const duplicate = keys.find((key, i) => key && keys.indexOf(key) !== i);
+  if (duplicate) {
+    metadataErrors.push(`${duplicate} is listed twice.`);
+  }
+  if (metadataErrors.length > 0) {
+    errors.metadata = metadataErrors.join(' ');
+  }
   if (values.lines.length < 2) {
     lineErrors.push('A transaction needs at least two accounts.');
   }
@@ -594,6 +727,7 @@ const lineToPosting = (line: Line): EnhancedExpenseLine => {
     precision: countDecimals(line.amount.trim().replace(/,/g, '')),
     annotations,
     comment: line.comment.trim() || undefined,
+    metadata: parseMetadata(line.comment),
   };
 };
 
@@ -614,6 +748,49 @@ const formatDate = (dateISO: string, ctx: FormContext): string => {
 /**
  * buildTransactionText turns the form values into ledger text.
  */
+const metadataComment = (row: MetaRow): Commentline => ({
+  line: -1,
+  raw: '',
+  comment: formatMetadataComment(row.key.trim(), row.value),
+});
+
+/**
+ * buildLeadingComments writes the comment lines between the header and the
+ * first posting. Metadata lines whose rows are unchanged keep their original
+ * text; changed rows are rewritten in place, removed rows drop their line,
+ * free-text comments stay as they are and new rows are added at the end.
+ */
+const buildLeadingComments = (
+  rows: MetaRow[],
+  leadingComments: Commentline[],
+): Commentline[] => {
+  const result: Commentline[] = [];
+  leadingComments.forEach((comment) => {
+    if (!isMetadataOnly(comment.comment)) {
+      result.push(comment);
+      return;
+    }
+    const originalCount = Object.keys(parseMetadata(comment.comment)).length;
+    const lineRows = rows.filter((row) => row.sourceLine === comment.line);
+    const unchanged =
+      lineRows.length === originalCount &&
+      lineRows.every(
+        (row) => row.key === row.originalKey && row.value === row.originalValue,
+      );
+    if (unchanged) {
+      result.push(comment);
+    } else {
+      lineRows
+        .filter((row) => row.key.trim() !== '')
+        .forEach((row) => result.push(metadataComment(row)));
+    }
+  });
+  rows
+    .filter((row) => row.sourceLine === undefined && row.key.trim() !== '')
+    .forEach((row) => result.push(metadataComment(row)));
+  return result;
+};
+
 export const buildTransactionText = (
   values: Values,
   ctx: FormContext,
@@ -650,7 +827,7 @@ export const buildTransactionText = (
   }
 
   const expenselines: (EnhancedExpenseLine | Commentline)[] = [
-    ...leadingComments,
+    ...buildLeadingComments(values.metadata, leadingComments),
   ];
   values.lines.forEach((line) => {
     expenselines.push(lineToPosting(line), ...line.trailingComments);
@@ -668,6 +845,7 @@ export const buildTransactionText = (
       payee,
       comment: original?.value.comment,
       expenselines,
+      metadata: {},
     },
   };
   const text = formatTransaction(tx, ctx.txCache.commodityMap);

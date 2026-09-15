@@ -11,6 +11,9 @@ import {
   lineLabel,
   linesAreUntouched,
   makeLine,
+  makeMetaRow,
+  metadataValueSuggestions,
+  MetaRow,
   minDecimalsFor,
   seedFirstLine,
   validateValues,
@@ -103,6 +106,25 @@ const FormStyles = styled.div`
     gap: 8px;
     justify-content: flex-end;
     margin-top: 12px;
+  }
+
+  .ledger-metadata {
+    margin: 8px 0;
+  }
+
+  .ledger-meta-key {
+    flex: 0 1 38%;
+    min-width: 0;
+  }
+
+  .ledger-next-value {
+    flex: 0 0 auto;
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .ledger-add-metadata {
+    margin-top: 4px;
   }
 
   .ledger-warning {
@@ -201,6 +223,57 @@ const ExpenseLine: React.FC<{
           />
         </div>
       ) : null}
+    </div>
+  );
+};
+
+const MetadataRowFields: React.FC<{
+  row: MetaRow;
+  txCache: TransactionCache;
+  update: (changes: Partial<MetaRow>) => void;
+  remove: () => void;
+}> = ({ row, txCache, update, remove }): JSX.Element => {
+  const { next, values } = React.useMemo(
+    () => metadataValueSuggestions(txCache, row.key.trim()),
+    [txCache, row.key],
+  );
+  return (
+    <div className="ledger-row ledger-meta-row">
+      <div className="ledger-meta-key">
+        <TextSuggest
+          value={row.key}
+          onChange={(key) => update({ key })}
+          suggestions={txCache.metadataKeys}
+          placeholder="Name, e.g. Edition"
+        />
+      </div>
+      <div className="ledger-grow">
+        <TextSuggest
+          value={row.value}
+          onChange={(value) => update({ value })}
+          suggestions={values}
+          placeholder={row.needsValue ? 'Value' : 'Value (empty for a tag)'}
+        />
+      </div>
+      {next && row.value.trim() === '' ? (
+        <button
+          type="button"
+          className="ledger-next-value"
+          title={`Use the next ${row.key}`}
+          onClick={() => update({ value: next })}
+        >
+          Next: {next}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="ledger-icon-button"
+        aria-label="Remove field"
+        title="Remove"
+        onClick={remove}
+      >
+        ✕
+      </button>
     </div>
   );
 };
@@ -307,9 +380,15 @@ export const EditTransaction: React.FC<{
       date: pageErrors.date,
       payee: pageErrors.payee,
       total: pageErrors.total,
+      metadata: pageErrors.metadata,
     };
     setErrors(relevant);
-    if (relevant.date || relevant.payee || relevant.total) {
+    if (
+      relevant.date ||
+      relevant.payee ||
+      relevant.total ||
+      relevant.metadata
+    ) {
       return;
     }
     const seeded = seedFirstLine(values, seed.current);
@@ -324,7 +403,12 @@ export const EditTransaction: React.FC<{
     const allErrors = validateValues(values, ctx);
     setErrors(allErrors);
     if (Object.values(allErrors).some((e) => e)) {
-      if (allErrors.date || allErrors.payee || allErrors.total) {
+      if (
+        allErrors.date ||
+        allErrors.payee ||
+        allErrors.total ||
+        allErrors.metadata
+      ) {
         setPage(1);
       }
       return;
@@ -444,6 +528,43 @@ export const EditTransaction: React.FC<{
             {errors.date ? (
               <div className="ledger-error">{errors.date}</div>
             ) : null}
+
+            <div className="ledger-metadata">
+              {values.metadata.length > 0 ? (
+                <div className="ledger-line-label">Tags & metadata</div>
+              ) : null}
+              {values.metadata.map((row) => (
+                <MetadataRowFields
+                  key={row.id}
+                  row={row}
+                  txCache={props.txCache}
+                  update={(changes) =>
+                    set({
+                      metadata: values.metadata.map((r) =>
+                        r.id === row.id ? { ...r, ...changes } : r,
+                      ),
+                    })
+                  }
+                  remove={() =>
+                    set({
+                      metadata: values.metadata.filter((r) => r.id !== row.id),
+                    })
+                  }
+                />
+              ))}
+              {errors.metadata ? (
+                <div className="ledger-error">{errors.metadata}</div>
+              ) : null}
+              <button
+                type="button"
+                className="ledger-add-metadata"
+                onClick={() =>
+                  set({ metadata: [...values.metadata, makeMetaRow()] })
+                }
+              >
+                + Tag or metadata
+              </button>
+            </div>
 
             <div className="ledger-actions">
               <button type="button" onClick={props.close}>
