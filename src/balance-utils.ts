@@ -312,6 +312,57 @@ export const makeBudgetRows = (
     );
 };
 
+export interface SubAccountRow {
+  /** Full name of the direct sub-account, or of the account itself. */
+  account: string;
+  commodity: string;
+  /** Balance at the end of the day, including the sub-account's children. */
+  balance: number;
+}
+
+/**
+ * makeSubAccountRows is the equivalent of `ledger bal <account> --depth N+1`:
+ * the balance of each direct sub-account (with its own children rolled up),
+ * per commodity, at the end of `endISO`. Postings made to the account itself
+ * get a row of their own. Settled (zero) balances are left out.
+ */
+export const makeSubAccountRows = (
+  history: BalanceHistory,
+  account: string,
+  endISO: string,
+  commodities: Map<string, CommodityInfo>,
+): SubAccountRow[] => {
+  const depth = account.split(':').length;
+  const direct = new Set<string>();
+  history.accounts.forEach((candidate) => {
+    if (isAccountOrChild(candidate, account)) {
+      direct.add(
+        candidate
+          .split(':')
+          .slice(0, depth + 1)
+          .join(':'),
+      );
+    }
+  });
+
+  const rows: SubAccountRow[] = [];
+  [...direct].sort().forEach((name) => {
+    // The account itself only counts its own postings; children get rows.
+    const own = name === account;
+    history.balanceAt(name, endISO, !own).forEach((quantity, commodity) => {
+      const info = commodities.get(commodity);
+      if (Math.abs(quantity) > tolerance(info ? info.precision : 2)) {
+        rows.push({ account: name, commodity, balance: round(quantity) });
+      }
+    });
+  });
+  return rows.sort(
+    (a, b) =>
+      a.account.localeCompare(b.account) ||
+      a.commodity.localeCompare(b.commodity),
+  );
+};
+
 export interface MetadataGroupRow {
   /** The metadata value; null for postings without the key. */
   value: string | null;

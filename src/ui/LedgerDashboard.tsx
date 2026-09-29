@@ -32,6 +32,7 @@ import { DateRangeSelector } from './DateRangeSelector';
 import { MetadataFilterBar } from './MetadataFilterBar';
 import { MetadataGroups } from './MetadataGroups';
 import { ParseErrors } from './ParseErrors';
+import { SubAccountTable } from './SubAccountTable';
 import { TransactionTable, UNREVIEWED_TAG } from './TransactionList';
 import { Step, Steps } from 'intro.js-react';
 import { Moment } from 'moment';
@@ -397,6 +398,16 @@ const SelectedAccounts: React.FC<{
       isFlowAccount={state.isFlowAccount}
       compact={mobile}
     />
+    {state.selectedAccounts.map((account) => (
+      <SubAccountTable
+        key={account}
+        account={account}
+        history={state.history}
+        txCache={props.txCache}
+        endISO={state.endISO}
+        onSelectAccount={(child) => state.setSelectedAccounts([child])}
+      />
+    ))}
     <TransactionTable
       key={state.selectedAccounts.join('|')}
       transactions={state.selectedTransactions}

@@ -91,7 +91,7 @@ const ChartStyles = styled.div`
   }
 `;
 
-const formatDate = (dateISO: string): string =>
+export const formatDate = (dateISO: string): string =>
   window.moment(dateISO, 'YYYY-MM-DD').format('MMM D, YYYY');
 
 /**
