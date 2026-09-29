@@ -158,6 +158,49 @@ describe.each([false, true])('LedgerDashboard (mobile: %s)', (mobile) => {
     });
     expect(container.textContent).toContain('Opening');
   });
+
+  test('a parent account shows the balances of its sub-accounts', () => {
+    act(() => {
+      ReactDOM.render(
+        <LedgerDashboard
+          tutorialIndex={-1}
+          setTutorialIndex={jest.fn()}
+          settings={settings}
+          txCache={txCache}
+          updater={updater}
+        />,
+        container,
+      );
+    });
+    if (mobile) {
+      click(buttonWithText('Accounts'));
+    }
+    const accountNamed = (name: string): Element | undefined =>
+      [...container.querySelectorAll('.ledger-account-name')].find(
+        (el) => el.textContent === name,
+      );
+    click(accountNamed('Assets'));
+    const table = container.querySelector(
+      '.ledger-subaccount-table',
+    ) as HTMLDetailsElement;
+    expect(table.open).toBe(false);
+    expect(table.querySelector('summary')?.textContent).toContain(
+      'Balances in Assets',
+    );
+    expect(table.querySelector('summary')?.textContent).toContain(
+      '(1 account)',
+    );
+    const rows = (): string[] =>
+      [...container.querySelectorAll('.ledger-subaccount-table tbody tr')].map(
+        (tr) => tr.textContent || '',
+      );
+    expect(rows()).toEqual(['Checking$1000.00', 'Checking20.00 USD']);
+
+    // Clicking a row opens the sub-account, which is a leaf: no table.
+    click(container.querySelector('.ledger-subaccount-table tbody tr'));
+    expect(container.querySelector('.ledger-subaccount-table')).toBeNull();
+    expect(container.textContent).toContain('Assets:Checking on');
+  });
 });
 
 test('autofill on leaving the payee keeps the typed total', () => {

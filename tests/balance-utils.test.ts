@@ -4,6 +4,7 @@ import {
   makeBudgetRows,
   makeMetadataGroups,
   makeNetWorthSeries,
+  makeSubAccountRows,
   metadataKeysByAccount,
   netWorthAt,
   removeDuplicateAccounts,
@@ -88,6 +89,80 @@ describe('BalanceHistory', () => {
     expect(
       makeAccountSeries(history, 'Assets', buckets, 'USD', 'balance'),
     ).toEqual([0, 20]);
+  });
+});
+
+describe('makeSubAccountRows()', () => {
+  const loans = parse(
+    `2024/01/01 Lent
+    Assets:Loans:Ana    $100
+    Assets:Loans:Dad:Gas    $30
+    Assets:Loans:Dad:Food    $20
+    Assets:Loans    $5
+    Assets:Checking
+
+2024/01/05 Borrowed
+    Assets:Checking    $250
+    Assets:Loans:Beto    -$250
+
+2024/01/10 Ana paid back part in USD
+    Assets:Loans:Ana    -$100
+    Assets:Loans:Ana    10 USD
+    Assets:Checking
+
+2024/03/01 Settled with Beto
+    Assets:Loans:Beto    $250
+    Assets:Checking`,
+    settings,
+  );
+  const history = new BalanceHistory(loans.transactions);
+
+  test('rolls up each direct sub-account per commodity', () => {
+    expect(
+      makeSubAccountRows(
+        history,
+        'Assets:Loans',
+        '2024-01-31',
+        loans.commodityMap,
+      ),
+    ).toEqual([
+      { account: 'Assets:Loans', commodity: '$', balance: 5 },
+      { account: 'Assets:Loans:Ana', commodity: 'USD', balance: 10 },
+      { account: 'Assets:Loans:Beto', commodity: '$', balance: -250 },
+      { account: 'Assets:Loans:Dad', commodity: '$', balance: 50 },
+    ]);
+  });
+
+  test('leaves out settled balances and respects the end date', () => {
+    expect(
+      makeSubAccountRows(
+        history,
+        'Assets:Loans',
+        '2024-03-31',
+        loans.commodityMap,
+      ).map((row) => row.account),
+    ).not.toContain('Assets:Loans:Beto');
+    expect(
+      makeSubAccountRows(
+        history,
+        'Assets:Loans',
+        '2023-12-31',
+        loans.commodityMap,
+      ),
+    ).toEqual([]);
+  });
+
+  test('a leaf account has only its own row', () => {
+    expect(
+      makeSubAccountRows(
+        history,
+        'Assets:Loans:Dad:Gas',
+        '2024-01-31',
+        loans.commodityMap,
+      ),
+    ).toEqual([
+      { account: 'Assets:Loans:Dad:Gas', commodity: '$', balance: 30 },
+    ]);
   });
 });
 
